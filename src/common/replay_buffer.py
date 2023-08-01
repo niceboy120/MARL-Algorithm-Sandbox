@@ -24,11 +24,11 @@ class ReplayBuffer:
             s_prime_lst.append(s_prime)
             done_mask_lst.append((np.ones(len(done)) - done).tolist())
 
-        return torch.tensor(s_lst, dtype=torch.float), \
-               torch.tensor(a_lst, dtype=torch.float), \
-               torch.tensor(r_lst, dtype=torch.float), \
-               torch.tensor(s_prime_lst, dtype=torch.float), \
-               torch.tensor(done_mask_lst, dtype=torch.float)
+        return torch.tensor(np.array(s_lst), dtype=torch.float), \
+               torch.tensor(np.array(a_lst), dtype=torch.float), \
+               torch.tensor(np.array(r_lst), dtype=torch.float), \
+               torch.tensor(np.array(s_prime_lst), dtype=torch.float), \
+               torch.tensor(np.array(done_mask_lst), dtype=torch.float)
 
 
     def sample_chunk(self, batch_size, chunk_size):
@@ -45,11 +45,11 @@ class ReplayBuffer:
                 done_lst.append(done)
 
         n_agents, obs_size = len(s_lst[0]), len(s_lst[0][0])
-        return torch.tensor(s_lst, dtype=torch.float).view(batch_size, chunk_size, n_agents, obs_size), \
-               torch.tensor(a_lst, dtype=torch.float).view(batch_size, chunk_size, n_agents), \
-               torch.tensor(r_lst, dtype=torch.float).view(batch_size, chunk_size, n_agents), \
-               torch.tensor(s_prime_lst, dtype=torch.float).view(batch_size, chunk_size, n_agents, obs_size), \
-               torch.tensor(done_lst, dtype=torch.float).view(batch_size, chunk_size, 1)
+        return torch.tensor(np.array(s_lst), dtype=torch.float).view(batch_size, chunk_size, n_agents, obs_size), \
+               torch.tensor(np.array(a_lst), dtype=torch.float).view(batch_size, chunk_size, n_agents), \
+               torch.tensor(np.array(r_lst), dtype=torch.float).view(batch_size, chunk_size, n_agents), \
+               torch.tensor(np.array(s_prime_lst), dtype=torch.float).view(batch_size, chunk_size, n_agents, obs_size), \
+               torch.tensor(np.array(done_lst), dtype=torch.float).view(batch_size, chunk_size, 1)
 
     def size(self):
         return len(self.buffer)
