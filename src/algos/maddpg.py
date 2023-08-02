@@ -68,10 +68,8 @@ class MADDPG(MALearner):
         if self.memory.size() > self.warm_up_steps:
             for i in range(self.update_iter):
                 self.train(self.gamma, self.batch_size)
-            
-        # at every update interval update the target q_network
-        if episode_i % self.update_target_interval:
-            self.q_target.load_state_dict(self.q.state_dict())
+                self.soft_update(self.mu, self.mu_target, self.tau)
+                self.soft_update(self.q, self.q_target, self.tau)
 
 
     def soft_update(self, net, net_target, tau):

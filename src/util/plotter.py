@@ -52,59 +52,64 @@ def plot_algo_compare(plot_info, results):
     plt.ylabel('Sum of episode rewards')
     #plt.ylim(y_lim)
 
+    log_interval = 100
+
+    x = [i for i in range(num_episodes // log_interval)]
     
     for result in results:
         plot_data = np.load(f"../results/{result}")
-        print(plot_data)
+        print(plot_data.shape)
+        # max_plot_data = np.max(plot_data, axis=0)
+        # avg_plot_data = np.mean(plot_data, axis=0).transpose()
+        # std_plot_data = np.std(plot_data, axis=0).transpose()
+        # min_plot_data = np.min(plot_data, axis=0)
+        # print(plot_data[0])
+        y = plot_data.transpose()[0]
 
-        for datum in plot_data[1::]:
-            episode_i.append(datum[0])
-            scores.append(datum[1])
-            steps.append(datum[2])
+        # for datum in plot_data[1::]:
+        #     episode_i.append(datum[0])
+        #     scores.append(datum[1])
+        #     steps.append(datum[2])
         
-        x = episode_i
-        y = scores
+        # y = scores
 
-        y = avg_plot_data[2]
-        y_std = std_plot_data[2]
-
-        plt.plot(x_axis, y_axis)
-
+        # y = avg_plot_data[1]
+        # y_std = std_plot_data[1]
 
         plt.plot(x, y)
-        plt.fill_between(x, y+y_std, y-y_std, facecolor='yellow', alpha=0.5)
+        # plt.fill_between(x, y+y_std, y-y_std, facecolor='yellow', alpha=0.5)
 
-    # plt.axhline(y=hbar, color='y', linestyle='--')
-    plt.legend([r"$\mu$", r"$\pm\sigma$"])
-    plt.grid()
+    # # plt.axhline(y=hbar, color='y', linestyle='--')
+    # plt.legend([r"$\mu$", r"$\pm\sigma$"])
+    # plt.grid()
+    # # plt.show()
+    # plt.savefig(f"./results/rewards_{rel_str}_{strat_str}_{custom_env_options['grid_size']}_grid_{custom_sim_options['num_runs']}_runs.svg", format="svg")
+
+    # plt.clf()
+    # plt.suptitle('Total Steps to Complete Episode')
+    # plt.title(f"averaged over {custom_sim_options['num_runs']} runs")
+    # plt.xlabel('Episodes')
+    # plt.ylabel('Step count')
+    # #plt.ylim(y_lim)
+
+
+
+    #     plt.plot(x, y2)
+    #     # plot errors
+    #     #plt.errorbar(x, y, yerr=asymmetric_error, fmt='-o')
+    #     plt.fill_between(x, y2+y2_std, y2-y2_std, facecolor='yellow', alpha=0.5)
+
+    #     # plt.axhline(y=hbar, color='y', linestyle='--')
+    #     plt.legend([r"$\mu$", r"$\pm\sigma$"])
+    #     plt.grid()
+    #     # plt.show()
+    #     plt.savefig(f"./results/steps_{rel_str}_{strat_str}_{custom_env_options['grid_size']}_grid_{custom_sim_options['num_runs']}_runs.svg", format="svg")
+
+    # plt.title('title name')
+    # plt.xlabel('x_axis name')
+    # plt.ylabel('y_axis name')
+
     # plt.show()
-    plt.savefig(f"./results/rewards_{rel_str}_{strat_str}_{custom_env_options['grid_size']}_grid_{custom_sim_options['num_runs']}_runs.svg", format="svg")
-
-    plt.clf()
-    plt.suptitle('Total Steps to Complete Episode')
-    plt.title(f"averaged over {custom_sim_options['num_runs']} runs")
-    plt.xlabel('Episodes')
-    plt.ylabel('Step count')
-    #plt.ylim(y_lim)
-
-
-
-        plt.plot(x, y2)
-        # plot errors
-        #plt.errorbar(x, y, yerr=asymmetric_error, fmt='-o')
-        plt.fill_between(x, y2+y2_std, y2-y2_std, facecolor='yellow', alpha=0.5)
-
-        # plt.axhline(y=hbar, color='y', linestyle='--')
-        plt.legend([r"$\mu$", r"$\pm\sigma$"])
-        plt.grid()
-        # plt.show()
-        plt.savefig(f"./results/steps_{rel_str}_{strat_str}_{custom_env_options['grid_size']}_grid_{custom_sim_options['num_runs']}_runs.svg", format="svg")
-
-    plt.title('title name')
-    plt.xlabel('x_axis name')
-    plt.ylabel('y_axis name')
-
-    plt.show()
 
 
 # def get_int_from_binary_array(bin_array):

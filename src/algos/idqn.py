@@ -27,6 +27,14 @@ default_options = {
 
 
 class IDQN(MALearner):
+    """Independent Deep Q Network
+    a trivial MARL algorithm where each agent independently learns state-action
+    values by training a seperate deep q network (DQN)
+    
+
+    Args:
+        MALearner (class): The base learner class for MARL algorithms
+    """
     def __init__(self, observation_space, action_space, options=default_options):
         super().__init__(observation_space, action_space, options)
 
@@ -59,11 +67,11 @@ class IDQN(MALearner):
             # gather a sample of the transition data from memory
             s, a, r, s_prime, done_mask = self.memory.sample(batch_size)
             
-            # estimate the value of the original state and action
+            # estimate the value of the current states and actions
             q_out = self.q(s)
             q_a = q_out.gather(2, a.unsqueeze(-1).long()).squeeze(-1)
 
-            # estimate the target value based on the next state
+            # estimate the target value as the discounted q value of the optimal actions in the next states
             max_q_prime = self.q_target(s_prime).max(dim=2)[0]
             target = r + gamma * max_q_prime * done_mask
 
@@ -79,7 +87,15 @@ class IDQN(MALearner):
 
 
 class QNet(nn.Module):
+    """A Deep Q Network 
+    """
     def __init__(self, observation_space, action_space):
+        """initialize the deep q network
+
+        Args:
+            observation_space ([gym.Env.observation_space]): The observation space for each agent
+            action_space ([gym.Env.action_space]): The action space for each agent
+        """
         super(QNet, self).__init__()
         self.num_agents = len(observation_space)
         for agent_i in range(self.num_agents):
@@ -95,13 +111,32 @@ class QNet(nn.Module):
             )
 
     def forward(self, obs):
+        """Forward propogation for the Deep Q Network
+
+        Args:
+            obs (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+        # print(f"obs: {obs.shape}")
         q_values = [torch.empty(obs.shape[0], )] * self.num_agents
         for agent_i in range(self.num_agents):
+            # print(f"agent_i obs: {obs[:, agent_i, :].shape}")
             q_values[agent_i] = getattr(self, 'agent_{}'.format(agent_i))(obs[:, agent_i, :]).unsqueeze(1)
 
         return torch.cat(q_values, dim=1)
 
     def sample_action(self, obs, epsilon):
+        """Sample an action from the Q-Network using an epsilon greedy policy
+
+        Args:
+            obs (list): a list of observations for each agent
+            epsilon (float): 
+
+        Returns:
+            _type_: _description_
+        """
         out = self.forward(obs)
         mask = (torch.rand((out.shape[0],)) <= epsilon)
         action = torch.empty((out.shape[0], out.shape[1],))
