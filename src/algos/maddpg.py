@@ -88,6 +88,7 @@ class MADDPG(MALearner):
 
         # Critic Update
         target = reward + gamma * self.q_target(next_state, next_state_action) * done_mask
+        # loss is calculated as the TD-error between the target and prediction DQNs
         q_loss = F.smooth_l1_loss(self.q(state, action), target.detach())
         self.q_optimizer.zero_grad()
         q_loss.backward()
@@ -117,8 +118,9 @@ class MuNet(nn.Module):
             n_obs = observation_space[agent_i].shape[0]
             num_action = action_space[agent_i].n
             setattr(self, 'agent_{}'.format(agent_i), 
-                nn.Sequential(nn.Linear(n_obs, 128),
-                    nn.ReLU(),
+                nn.Sequential(
+                        nn.Linear(n_obs, 128),
+                        nn.ReLU(),
                         nn.Linear(128, 64),
                         nn.ReLU(),
                         nn.Linear(64, num_action)

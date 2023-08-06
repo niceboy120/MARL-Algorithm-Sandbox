@@ -58,29 +58,33 @@ class VDN(MALearner):
     def train(self, gamma, batch_size, update_iter=10, chunk_size=10, grad_clip_norm=5):
         _chunk_size = chunk_size if self.q.recurrent else 1
         for _ in range(update_iter):
+            # gather a sample of the transition data from memory
             s, a, r, s_prime, done = self.memory.sample_chunk(batch_size, _chunk_size)
 
             hidden = self.q.init_hidden(batch_size)
             target_hidden = self.q_target.init_hidden(batch_size)
             loss = 0
             for step_i in range(_chunk_size):
+                # estimate the value of the current states and actions
                 q_out, hidden = self.q(s[:, step_i, :, :], hidden)
-                #q_out = self.q(s[:, step_i, :, :])
                 q_a = q_out.gather(2, a[:, step_i, :].unsqueeze(-1).long()).squeeze(-1)
+                # sum over all the action values
                 sum_q = q_a.sum(dim=1, keepdims=True)
 
+                # estimate the target value as the discounted q value of the optimal actions in the next states
                 max_q_prime, target_hidden = self.q_target(s_prime[:, step_i, :, :], target_hidden.detach())
-                #max_q_prime = self.q_target(s_prime[:, step_i, :, :])
                 max_q_prime = max_q_prime.max(dim=2)[0].squeeze(-1)
                 target_q = r[:, step_i, :].sum(dim=1, keepdims=True)
                 target_q += gamma * max_q_prime.sum(dim=1, keepdims=True) * (1 - done[:, step_i])
 
+                # calculate loss from the summed action value and next state values
                 loss += F.smooth_l1_loss(sum_q, target_q.detach())
 
                 done_mask = done[:, step_i].squeeze(-1).bool()
                 hidden[done_mask] = self.q.init_hidden(len(hidden[done_mask]))
                 target_hidden[done_mask] = self.q_target.init_hidden(len(target_hidden[done_mask]))
 
+            # perform backpropagation
             self.optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.q.parameters(), grad_clip_norm, norm_type=2)

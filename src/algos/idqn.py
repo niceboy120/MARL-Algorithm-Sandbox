@@ -114,10 +114,10 @@ class QNet(nn.Module):
         """Forward propogation for the Deep Q Network
 
         Args:
-            obs (_type_): _description_
+            obs (_type_): The obseravtions for each agent
 
         Returns:
-            _type_: _description_
+            torch.tensor: torch tensor representing action probabilities
         """
         # print(f"obs: {obs.shape}")
         q_values = [torch.empty(obs.shape[0], )] * self.num_agents

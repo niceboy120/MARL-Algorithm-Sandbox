@@ -124,7 +124,7 @@ if __name__ == '__main__':
         'num_runs': args.num_runs,
         'max_epsilon': 0.9,
         'min_epsilon': 0.1,
-        'test_episodes': 5,
+        'test_episodes': 10,
         'max_steps': 10000,
         'options': default_options
     }
