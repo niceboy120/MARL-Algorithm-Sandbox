@@ -32,7 +32,15 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_
 
     score = 0
     #result_data = np.zeros((num_runs, num_episodes, 2))
-    result_data = np.zeros((num_episodes // log_interval, 2))
+    # result_data = np.zeros((num_episodes // log_interval, 2))
+    result_data = torch.zeros([num_episodes // log_interval, 2])
+    if torch.cuda.is_available():  
+        dev = f'cuda:0' 
+        print(f"Using Device: {torch.cuda.get_device_name(0)}")
+    else:  
+        dev = 'cpu'  
+    device = torch.device(dev)  
+    result_data = result_data.to(device)
     # perform runs
     # for run_i in range(num_runs):
     #     print(f"performing run: {run_i}")
@@ -71,8 +79,8 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_
             # result_data[run_i][episode_i][1] = steps
             test_score, test_steps = learner.test(test_env, test_episodes)
             print(f"episode: {episode_i}/{num_episodes}: score: {test_score}, steps: {test_steps}")
-            result_data[episode_i // log_interval][0] = test_score
-            result_data[episode_i // log_interval][1] = test_steps
+            result_data[episode_i // log_interval, 0] = test_score
+            result_data[episode_i // log_interval, 1] = test_steps
         #     print(f"episode: {episode_i}/{num_episodes}: score: {test_score}, steps: {test_steps}")
         #     result_data[episode_i][0] = score
         #     result_data[episode_i][1] = steps
@@ -80,7 +88,7 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_
         #     print("#{:<10}/{} episodes , avg train score : {:.1f}, test score: {:.1f}, test steps: {:.1f}, epsilon : {:.1f}"
         #             .format(episode_i, num_episodes, train_score, test_score, test_steps, epsilon))
 
-    np.save(f"{results_dir}/{algo}_{num_episodes}_{num_runs}_{env_name}.npy", result_data)
+    np.save(f"{results_dir}/{algo}_{num_episodes}_{num_runs}_{env_name}.npy", result_data.cpu())
     env.close()
     test_env.close()
 
