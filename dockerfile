@@ -1,5 +1,7 @@
 # using ubuntu LTS version
-FROM ubuntu:22.04 AS builder-image
+#FROM ubuntu:22.04 AS builder-image
+#FROM nvidia/cuda:11.2.1-runtime-ubuntu20.04 AS builder-image
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04 AS builder-image
 
 # avoid stuck build due to user prompt
 ARG DEBIAN_FRONTEND=noninteractive
@@ -21,7 +23,9 @@ RUN pip install --upgrade pip setuptools==65.5.1 wheel==0.38.4
 RUN pip install --no-cache-dir -r requirements.txt
 
 
-FROM ubuntu:22.04 AS runner-image
+#FROM ubuntu:22.04 AS runner-image
+#FROM nvidia/cuda:11.2.1-runtime-ubuntu20.04 AS runner-image
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04 AS runner-image
 RUN apt-get update && apt-get install --no-install-recommends -y python3.10 python3-venv && \
 	apt-get clean && rm -rf /var/lib/apt/lists/*
 

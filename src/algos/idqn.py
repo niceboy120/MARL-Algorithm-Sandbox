@@ -42,8 +42,6 @@ class IDQN(MALearner):
         self.q_target = QNet(observation_space, action_space)
         self.q_target.load_state_dict(self.q.state_dict())
 
-        self.q.cuda()
-        self.q_target.cuda()
 
         self.optimizer = optim.Adam(self.q.parameters(), lr=self.lr)
 
@@ -101,6 +99,8 @@ class QNet(nn.Module):
         """
         super(QNet, self).__init__()
         self.num_agents = len(observation_space)
+        self.set_device()
+
         for agent_i in range(self.num_agents):
             n_obs = observation_space[agent_i].shape[0]
             setattr(self, 'agent_{}'.format(agent_i), 
@@ -110,17 +110,21 @@ class QNet(nn.Module):
                     nn.Linear(128, 64),
                     nn.ReLU(),
                     nn.Linear(64, action_space[agent_i].n)
-                )
+                ).to(self.device)
             )
 
-    def cuda(self, i=0):
+
+    def set_device(self, i=0):
         if torch.cuda.is_available():  
-            dev = f"cuda:{i}" 
+            dev = f'cuda:{i}' 
+            print(f"Using Device: {torch.cuda.get_device_name(i)}")
         else:  
-            dev = "cpu"  
+            dev = 'cpu'  
+        print(f"device name: {dev}")
         device = torch.device(dev)  
-        print(f"Using Device: {torch.get_device_name(device)}")
-        self.cuda(device)
+        self.device = device
+
+        self.to(device)
 
 
     def forward(self, obs):
@@ -133,10 +137,10 @@ class QNet(nn.Module):
             torch.tensor: torch tensor representing action probabilities
         """
         # print(f"obs: {obs.shape}")
-        q_values = [torch.empty(obs.shape[0], )] * self.num_agents
+        q_values = [torch.empty(obs.shape[0], ).to(self.device)] * self.num_agents
         for agent_i in range(self.num_agents):
             # print(f"agent_i obs: {obs[:, agent_i, :].shape}")
-            q_values[agent_i] = getattr(self, 'agent_{}'.format(agent_i))(obs[:, agent_i, :]).unsqueeze(1)
+            q_values[agent_i] = getattr(self, 'agent_{}'.format(agent_i))(obs[:, agent_i, :].to(self.device)).unsqueeze(1)
 
         return torch.cat(q_values, dim=1)
 
@@ -151,8 +155,8 @@ class QNet(nn.Module):
             _type_: _description_
         """
         out = self.forward(obs)
-        mask = (torch.rand((out.shape[0],)) <= epsilon)
-        action = torch.empty((out.shape[0], out.shape[1],))
-        action[mask] = torch.randint(0, out.shape[2], action[mask].shape).float()
-        action[~mask] = out[~mask].argmax(dim=2).float()
+        mask = (torch.rand((out.shape[0],)).to(self.device) <= epsilon)
+        action = torch.empty((out.shape[0], out.shape[1],)).to(self.device)
+        action[mask] = torch.randint(0, out.shape[2], action[mask].shape).float().to(self.device)
+        action[~mask] = out[~mask].argmax(dim=2).float().to(self.device)
         return action
