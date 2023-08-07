@@ -42,6 +42,9 @@ class IDQN(MALearner):
         self.q_target = QNet(observation_space, action_space)
         self.q_target.load_state_dict(self.q.state_dict())
 
+        self.q.cuda()
+        self.q_target.cuda()
+
         self.optimizer = optim.Adam(self.q.parameters(), lr=self.lr)
 
     def init_hidden(self):
@@ -109,6 +112,16 @@ class QNet(nn.Module):
                     nn.Linear(64, action_space[agent_i].n)
                 )
             )
+
+    def cuda(self, i=0):
+        if torch.cuda.is_available():  
+            dev = f"cuda:{i}" 
+        else:  
+            dev = "cpu"  
+        device = torch.device(dev)  
+        print(f"Using Device: {torch.get_device_name(device)}")
+        self.cuda(device)
+
 
     def forward(self, obs):
         """Forward propogation for the Deep Q Network
