@@ -22,6 +22,7 @@ class MALearner:
         self.unpack_options(options)
         self.memory = ReplayBuffer(self.buffer_limit)
 
+
     def unpack_options(self, options):
         # apply all dictionary key-values as object properties
         for option in options:
@@ -45,3 +46,10 @@ class MALearner:
         avg_score = score / num_episodes
         avg_steps = steps / num_episodes
         return avg_score, avg_steps
+
+    def display_info(self, net):
+        print("\n Network Type:")
+        print(net.type)
+        print("\n Parameters are:")
+        for param in net.parameters():
+            print(type(param.data), param.size())

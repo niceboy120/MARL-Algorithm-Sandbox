@@ -38,11 +38,15 @@ class IDQN(MALearner):
     def __init__(self, observation_space, action_space, options=default_options):
         super().__init__(observation_space, action_space, options)
 
+        # instantiate the prediction (q) and target (q_target) networks
         self.q = QNet(observation_space, action_space)
         self.q_target = QNet(observation_space, action_space)
         self.q_target.load_state_dict(self.q.state_dict())
 
+        print("\nInstantiating Prediction Network:")
+        self.display_info(self.q)
 
+        # tell the optimizer to update the network parameters at the lr
         self.optimizer = optim.Adam(self.q.parameters(), lr=self.lr)
 
     def init_hidden(self):
@@ -91,8 +95,7 @@ class QNet(nn.Module):
     """A Deep Q Network 
     """
     def __init__(self, observation_space, action_space):
-        """initialize the deep q network
-
+        """
         Args:
             observation_space ([gym.Env.observation_space]): The observation space for each agent
             action_space ([gym.Env.action_space]): The action space for each agent
