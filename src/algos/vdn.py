@@ -30,6 +30,10 @@ class VDN(MALearner):
         self.q_target = QNet(observation_space, action_space, self.recurrent)
         self.q_target.load_state_dict(self.q.state_dict())
 
+
+        print("\nInstantiating Prediction Network:")
+        self.display_info(self.q)
+
         self.optimizer = optim.Adam(self.q.parameters(), lr=self.lr)
 
         self.q_hidden = self.q.init_hidden()
