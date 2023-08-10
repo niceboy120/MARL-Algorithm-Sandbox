@@ -14,7 +14,7 @@ from algos.qmix import QMix
 #from algos.commnet import DDPG
 
 
-def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_epsilon, min_epsilon, test_episodes, max_steps, options):
+def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_epsilon, min_epsilon, test_episodes, max_steps, options=None):
     env = gym.make(env_name)
     test_env = gym.make(env_name)
 
@@ -22,13 +22,13 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_
     print(f"using algorithm: {algo} on environment: {env_name}")
     match algo:
         case "vdn":
-            learner = VDN(env.observation_space, env.action_space, options)
-        case "mddpg":
-            learner = MADDPG(env.observation_space, env.action_space, options)
+            learner = VDN(env.observation_space, env.action_space)
+        case "maddpg":
+            learner = MADDPG(env.observation_space, env.action_space)
         case "qmix":
-            learner = QMix(env.observation_space, env.action_space, options)
+            learner = QMix(env.observation_space, env.action_space)
         case _:
-            learner = IDQN(env.observation_space, env.action_space, options)
+            learner = IDQN(env.observation_space, env.action_space)
 
     score = 0
     #result_data = np.zeros((num_runs, num_episodes, 2))
@@ -134,7 +134,6 @@ if __name__ == '__main__':
         'min_epsilon': 0.1,
         'test_episodes': 10,
         'max_steps': 10000,
-        'options': default_options
     }
 
     main(**kwargs)

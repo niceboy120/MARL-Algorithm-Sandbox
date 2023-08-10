@@ -9,6 +9,7 @@ import numpy as np
 
 from common.learner import MALearner
 
+# from torchview import draw_graph
 
 default_options = {
     'lr': 0.001,
@@ -43,8 +44,9 @@ class VDN(MALearner):
 
 
     def sample_action(self, obs, epsilon):
-        action, hidden = self.q.sample_action(obs, self.q_hidden, epsilon)
-        self.q_hidden = hidden
+        action = self.q.sample_action(obs, epsilon)
+        # action, hidden = self.q.sample_action(obs, self.q_hidden, epsilon)
+        # self.q_hidden = hidden
         return action
 
     def per_step_update(self, state, action, reward, next_state, done):
@@ -65,18 +67,26 @@ class VDN(MALearner):
             # gather a sample of the transition data from memory
             s, a, r, s_prime, done = self.memory.sample_chunk(batch_size, _chunk_size)
 
-            hidden = self.q.init_hidden(batch_size)
-            target_hidden = self.q_target.init_hidden(batch_size)
+            # hidden = self.q.init_hidden(batch_size)
+            # target_hidden = self.q_target.init_hidden(batch_size)
             loss = 0
             for step_i in range(_chunk_size):
                 # estimate the value of the current states and actions
-                q_out, hidden = self.q(s[:, step_i, :, :], hidden)
+                # q_out, hidden = self.q(s[:, step_i, :, :], hidden)
+                q_out = self.q(s[:, step_i, :, :])
                 q_a = q_out.gather(2, a[:, step_i, :].unsqueeze(-1).long()).squeeze(-1)
                 # sum over all the action values
                 sum_q = q_a.sum(dim=1, keepdims=True)
 
+
+                #shape = tuple(s.shape)
+                ##print(shape)
+                #draw_graph(self.q, input_size=shape, expand_nested=True, filename='./diagrams/vdn', save_graph=True)
+
+
                 # estimate the target value as the discounted q value of the optimal actions in the next states
-                max_q_prime, target_hidden = self.q_target(s_prime[:, step_i, :, :], target_hidden.detach())
+                # max_q_prime, target_hidden = self.q_target(s_prime[:, step_i, :, :], target_hidden.detach())
+                max_q_prime = self.q_target(s_prime[:, step_i, :, :])
                 max_q_prime = max_q_prime.max(dim=2)[0].squeeze(-1)
                 target_q = r[:, step_i, :].sum(dim=1, keepdims=True)
                 target_q += gamma * max_q_prime.sum(dim=1, keepdims=True) * (1 - done[:, step_i])
@@ -85,8 +95,8 @@ class VDN(MALearner):
                 loss += F.smooth_l1_loss(sum_q, target_q.detach())
 
                 done_mask = done[:, step_i].squeeze(-1).bool()
-                hidden[done_mask] = self.q.init_hidden(len(hidden[done_mask]))
-                target_hidden[done_mask] = self.q_target.init_hidden(len(target_hidden[done_mask]))
+                # hidden[done_mask] = self.q.init_hidden(len(hidden[done_mask]))
+                # target_hidden[done_mask] = self.q_target.init_hidden(len(target_hidden[done_mask]))
 
             # perform backpropagation
             self.optimizer.zero_grad()
@@ -109,37 +119,45 @@ class QNet(nn.Module):
                     nn.Linear(n_obs, 64),
                     nn.ReLU(),
                     nn.Linear(64, self.hx_size),
-                    nn.ReLU()
+                    nn.ReLU(),
+                    nn.GRUCell(self.hx_size, self.hx_size),
+                    nn.Linear(self.hx_size, action_space[agent_i].n)
                 )
             )
-            if recurrent:
-                setattr(self, 'agent_gru_{}'.format(agent_i), 
-                    nn.GRUCell(self.hx_size, self.hx_size)
-                )
-            setattr(self, 'agent_q_{}'.format(agent_i), 
-                nn.Linear(self.hx_size, action_space[agent_i].n)
-            )
+            # if recurrent:
+            #     setattr(self, 'agent_gru_{}'.format(agent_i), 
+            #         nn.GRUCell(self.hx_size, self.hx_size)
+            #     )
+            # setattr(self, 'agent_q_{}'.format(agent_i), 
+            #     nn.Linear(self.hx_size, action_space[agent_i].n)
+            # )
 
-    def forward(self, obs, hidden):
+    #def forward(self, obs, hidden):
+    def forward(self, obs):
         q_values = [torch.empty(obs.shape[0], )] * self.num_agents
-        next_hidden = [torch.empty(obs.shape[0], 1, self.hx_size)] * self.num_agents
+        # next_hidden = [torch.empty(obs.shape[0], 1, self.hx_size)] * self.num_agents
         for agent_i in range(self.num_agents):
-            x = getattr(self, 'agent_feature_{}'.format(agent_i))(obs[:, agent_i, :])
-            if self.recurrent:
-                x = getattr(self, 'agent_gru_{}'.format(agent_i))(x, hidden[:, agent_i, :])
-                next_hidden[agent_i] = x.unsqueeze(1)
-            q_values[agent_i] = getattr(self, 'agent_q_{}'.format(agent_i))(x).unsqueeze(1)
+            # x = getattr(self, 'agent_feature_{}'.format(agent_i))(obs[:, agent_i, :])
+            # if self.recurrent:
+            #     x = getattr(self, 'agent_gru_{}'.format(agent_i))(x, hidden[:, agent_i, :])
+            #     next_hidden[agent_i] = x.unsqueeze(1)
+            # q_values[agent_i] = getattr(self, 'agent_q_{}'.format(agent_i))(x).unsqueeze(1)
+            q_values[agent_i] = getattr(self, 'agent_feature_{}'.format(agent_i))(obs[:, agent_i, :]).unsqueeze(1)
 
-        return torch.cat(q_values, dim=1), torch.cat(next_hidden, dim=1)
-        #return torch.cat(q_values, dim=1)
+        #return torch.cat(q_values, dim=1), torch.cat(next_hidden, dim=1)
+        return torch.cat(q_values, dim=1)
 
-    def sample_action(self, obs, hidden, epsilon):
-        out, hidden = self.forward(obs, hidden)
+    # def sample_action(self, obs, hidden, epsilon):
+    def sample_action(self, obs, epsilon):
+        # out, hidden = self.forward(obs, hidden)
+        out = self.forward(obs)
+        # print(out.shape)
         mask = (torch.rand((out.shape[0],)) <= epsilon)
         action = torch.empty((out.shape[0], out.shape[1],))
         action[mask] = torch.randint(0, out.shape[2], action[mask].shape).float()
         action[~mask] = out[~mask].argmax(dim=2).float()
-        return action, hidden
+        # return action, hidden
+        return action
 
     def init_hidden(self, batch_size=1):
         return torch.zeros((batch_size, self.num_agents, self.hx_size))

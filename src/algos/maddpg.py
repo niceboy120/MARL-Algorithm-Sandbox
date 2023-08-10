@@ -11,9 +11,11 @@ import numpy as np
 
 from common.learner import MALearner
 
+from torchview import draw_graph
 
 
 default_options = {
+    'max_episodes': 30000,
     'lr_mu': 0.0005,
     'lr_q': 0.001,
     'batch_size': 32,
@@ -22,6 +24,8 @@ default_options = {
     'buffer_limit': 50000,
     'warm_up_steps': 2000,
     'update_iter': 10,
+    'chunk_size': 10,
+    'update_target_interval': 20,
     'gumbel_max_temp': 10,
     'gumbel_min_temp': 0.1
 }
@@ -45,10 +49,18 @@ class MADDPG(MALearner):
         self.mu_optimizer = optim.Adam(self.mu.parameters(), lr=self.lr_mu)
         self.q_optimizer = optim.Adam(self.q.parameters(), lr=self.lr_q)
 
+
+        self.temperature = max(
+            self.gumbel_min_temp,
+            self.gumbel_max_temp - (self.gumbel_max_temp - self.gumbel_min_temp) * (0 / (0.6 * self.max_episodes))
+        )
+
     def sample_action(self, obs, epsilon):
-        action_logits = self.mu(torch.Tensor(obs).unsqueeze(0))
+        action_logits = self.mu(torch.Tensor(obs))
         action_one_hot = F.gumbel_softmax(logits=action_logits.squeeze(0), tau=self.temperature, hard=True)
+        # action = torch.argmax(action_one_hot, dim=1).data.unsqueeze(0).float()
         action = torch.argmax(action_one_hot, dim=1).data.numpy()
+        print(action)
         return action
 
     def per_step_update(self, state, action, reward, next_state, done):
@@ -94,10 +106,23 @@ class MADDPG(MALearner):
         q_loss.backward()
         self.q_optimizer.step()
 
+
+        # shape = tuple(state.shape)
+        # draw_graph(self.mu, input_size=shape, expand_nested=True, filename='./diagrams/maddpg_mu', save_graph=True)
+
+
+
         state_action_logits = self.mu(state)
         state_action_logits = state_action_logits.view(batch_size * n_agents, action_size)
         state_action = F.gumbel_softmax(logits=state_action_logits, tau=0.1, hard=True)
         state_action = state_action.view(batch_size, n_agents, action_size)
+
+
+        # shape = tuple(state.shape)
+        # print(shape)
+        # draw_graph(self.mu, input_size=shape, expand_nested=True, filename='./diagrams/maddpg_mu', save_graph=True)
+
+
 
         # Actor Update
         mu_loss = -self.q(state, state_action).mean()  # That's all for the policy loss.
@@ -153,6 +178,9 @@ class QNet(nn.Module):
                 )
             )
     def forward(self, obs, action):
+        print(f"obs.shape: {obs.shape}")
+        print(f"action.shape: {action.shape}")
+        action = action.squeeze(0)
         q_values = [torch.empty(obs.shape[0], )] * self.num_agents
         x = torch.cat((obs.view(obs.shape[0], obs.shape[1] * obs.shape[2]),
                        action.view(action.shape[0], action.shape[1] * action.shape[2])), dim=1)

@@ -10,6 +10,8 @@ import numpy as np
 
 from common.learner import MALearner
 
+# from torchview import draw_graph
+
 default_options = {
     'lr': 0.0005,
     'batch_size': 32,
@@ -22,6 +24,7 @@ default_options = {
     'test_episodes': 5,
     'warm_up_steps': 2000,
     'update_iter': 10,
+    'update_target_interval': 20,
     'monitor': False
 }
 
@@ -75,6 +78,9 @@ class IDQN(MALearner):
             # estimate the value of the current states and actions
             q_out = self.q(s)
             q_a = q_out.gather(2, a.unsqueeze(-1).long()).squeeze(-1)
+            #shape = tuple(s.shape)
+            ##print(shape)
+            #draw_graph(self.q, input_size=shape, expand_nested=True, filename='./diagrams/idqn', save_graph=True)
 
             # estimate the target value as the discounted q value of the optimal actions in the next states
             max_q_prime = self.q_target(s_prime).max(dim=2)[0]
