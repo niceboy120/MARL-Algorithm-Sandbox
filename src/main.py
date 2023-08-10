@@ -35,8 +35,8 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_
     # result_data = np.zeros((num_episodes // log_interval, 2))
     result_data = torch.zeros([num_episodes // log_interval, 2])
     if torch.cuda.is_available():  
-        dev = f'cuda:{i}' 
-        print(f"Using Device: {torch.cuda.get_device_name(i)}")
+        dev = f'cuda:0' 
+        print(f"Using Device: {torch.cuda.get_device_name(0)}")
     else:  
         dev = 'cpu'  
     device = torch.device(dev)  
@@ -88,7 +88,7 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_
         #     print("#{:<10}/{} episodes , avg train score : {:.1f}, test score: {:.1f}, test steps: {:.1f}, epsilon : {:.1f}"
         #             .format(episode_i, num_episodes, train_score, test_score, test_steps, epsilon))
 
-    np.save(f"{results_dir}/{algo}_{num_episodes}_{num_runs}_{env_name}.npy", result_data)
+    np.save(f"{results_dir}/{algo}_{num_episodes}_{num_runs}_{env_name}.npy", result_data.cpu())
     env.close()
     test_env.close()
 
