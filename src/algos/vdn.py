@@ -9,7 +9,7 @@ import numpy as np
 
 from common.learner import MALearner
 
-# from torchview import draw_graph
+from torchview import draw_graph
 
 default_options = {
     'lr': 0.001,
@@ -26,6 +26,7 @@ default_options = {
 class VDN(MALearner):
     def __init__(self, observation_space, action_space, options=default_options):
         super().__init__(observation_space, action_space, options)
+        self.set_device()
 
         self.q = QNet(observation_space, action_space, self.recurrent)
         self.q_target = QNet(observation_space, action_space, self.recurrent)
@@ -41,6 +42,17 @@ class VDN(MALearner):
 
     # def init_hidden(self):
     #     return self.q.init_hidden()
+
+
+    def set_device(self, i=0):
+        if torch.cuda.is_available():  
+            dev = f'cuda:{i}' 
+            print(f"Using Device: {torch.cuda.get_device_name(i)}")
+        else:  
+            dev = 'cpu'  
+        print(f"device name: {dev}")
+        device = torch.device(dev)  
+        self.device = device
 
 
     def sample_action(self, obs, epsilon):
@@ -74,22 +86,22 @@ class VDN(MALearner):
                 # estimate the value of the current states and actions
                 # q_out, hidden = self.q(s[:, step_i, :, :], hidden)
                 q_out = self.q(s[:, step_i, :, :])
-                q_a = q_out.gather(2, a[:, step_i, :].unsqueeze(-1).long()).squeeze(-1)
+                q_a = q_out.gather(2, a[:, step_i, :].unsqueeze(-1).long().to(self.device)).squeeze(-1)
                 # sum over all the action values
                 sum_q = q_a.sum(dim=1, keepdims=True)
 
 
-                #shape = tuple(s.shape)
+                #shape = tuple(s[:, step_i, :, :].shape)
                 ##print(shape)
                 #draw_graph(self.q, input_size=shape, expand_nested=True, filename='./diagrams/vdn', save_graph=True)
 
 
                 # estimate the target value as the discounted q value of the optimal actions in the next states
                 # max_q_prime, target_hidden = self.q_target(s_prime[:, step_i, :, :], target_hidden.detach())
-                max_q_prime = self.q_target(s_prime[:, step_i, :, :])
+                max_q_prime = self.q_target(s_prime[:, step_i, :, :]).to(self.device)
                 max_q_prime = max_q_prime.max(dim=2)[0].squeeze(-1)
-                target_q = r[:, step_i, :].sum(dim=1, keepdims=True)
-                target_q += gamma * max_q_prime.sum(dim=1, keepdims=True) * (1 - done[:, step_i])
+                target_q = r[:, step_i, :].to(self.device).sum(dim=1, keepdims=True)
+                target_q += gamma * max_q_prime.sum(dim=1, keepdims=True) * (1 - done[:, step_i]).to(self.device)
 
                 # calculate loss from the summed action value and next state values
                 loss += F.smooth_l1_loss(sum_q, target_q.detach())
@@ -110,6 +122,8 @@ class QNet(nn.Module):
     def __init__(self, observation_space, action_space, recurrent=False):
         super(QNet, self).__init__()
         self.num_agents = len(observation_space)
+        self.set_device()
+
         self.recurrent = recurrent
         self.hx_size = 32
         for agent_i in range(self.num_agents):
@@ -122,7 +136,7 @@ class QNet(nn.Module):
                     nn.ReLU(),
                     nn.GRUCell(self.hx_size, self.hx_size),
                     nn.Linear(self.hx_size, action_space[agent_i].n)
-                )
+                ).to(self.device)
             )
             # if recurrent:
             #     setattr(self, 'agent_gru_{}'.format(agent_i), 
@@ -131,10 +145,22 @@ class QNet(nn.Module):
             # setattr(self, 'agent_q_{}'.format(agent_i), 
             #     nn.Linear(self.hx_size, action_space[agent_i].n)
             # )
+            
+
+    def set_device(self, i=0):
+        if torch.cuda.is_available():  
+            dev = f'cuda:{i}' 
+            print(f"Using Device: {torch.cuda.get_device_name(i)}")
+        else:  
+            dev = 'cpu'  
+        print(f"device name: {dev}")
+        device = torch.device(dev)  
+        self.device = device
+        self.to(device)
 
     #def forward(self, obs, hidden):
     def forward(self, obs):
-        q_values = [torch.empty(obs.shape[0], )] * self.num_agents
+        q_values = [torch.empty(obs.shape[0], ).to(self.device)] * self.num_agents
         # next_hidden = [torch.empty(obs.shape[0], 1, self.hx_size)] * self.num_agents
         for agent_i in range(self.num_agents):
             # x = getattr(self, 'agent_feature_{}'.format(agent_i))(obs[:, agent_i, :])
@@ -142,19 +168,19 @@ class QNet(nn.Module):
             #     x = getattr(self, 'agent_gru_{}'.format(agent_i))(x, hidden[:, agent_i, :])
             #     next_hidden[agent_i] = x.unsqueeze(1)
             # q_values[agent_i] = getattr(self, 'agent_q_{}'.format(agent_i))(x).unsqueeze(1)
-            q_values[agent_i] = getattr(self, 'agent_feature_{}'.format(agent_i))(obs[:, agent_i, :]).unsqueeze(1)
+            q_values[agent_i] = getattr(self, 'agent_feature_{}'.format(agent_i))(obs[:, agent_i, :].to(self.device)).unsqueeze(1)
 
         #return torch.cat(q_values, dim=1), torch.cat(next_hidden, dim=1)
-        return torch.cat(q_values, dim=1)
+        return torch.cat(q_values, dim=1).to(self.device)
 
     # def sample_action(self, obs, hidden, epsilon):
     def sample_action(self, obs, epsilon):
         # out, hidden = self.forward(obs, hidden)
         out = self.forward(obs)
         # print(out.shape)
-        mask = (torch.rand((out.shape[0],)) <= epsilon)
-        action = torch.empty((out.shape[0], out.shape[1],))
-        action[mask] = torch.randint(0, out.shape[2], action[mask].shape).float()
+        mask = (torch.rand((out.shape[0],)).to(self.device) <= epsilon)
+        action = torch.empty((out.shape[0], out.shape[1],)).to(self.device)
+        action[mask] = torch.randint(0, out.shape[2], action[mask].shape).float().to(self.device)
         action[~mask] = out[~mask].argmax(dim=2).float()
         # return action, hidden
         return action

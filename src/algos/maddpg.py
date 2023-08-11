@@ -11,7 +11,7 @@ import numpy as np
 
 from common.learner import MALearner
 
-from torchview import draw_graph
+#from torchview import draw_graph
 
 
 default_options = {
