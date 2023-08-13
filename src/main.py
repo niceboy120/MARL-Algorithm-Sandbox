@@ -8,6 +8,7 @@ import torch.nn.functional as F
 
 from algos.vdn import VDN
 from algos.idqn import IDQN
+from algos.commnet import COMMNET
 from algos.maddpg import MADDPG
 from algos.qmix import QMix
 
@@ -23,6 +24,8 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_
     match algo:
         case "vdn":
             learner = VDN(env.observation_space, env.action_space)
+        case "commnet":
+            learner = COMMNET(env.observation_space, env.action_space)
         case "maddpg":
             learner = MADDPG(env.observation_space, env.action_space)
         case "qmix":
