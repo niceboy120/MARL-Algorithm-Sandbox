@@ -10,7 +10,7 @@ import numpy as np
 
 from common.learner import MALearner
 
-# from torchview import draw_graph
+from torchview import draw_graph
 
 default_options = {
     'lr': 0.0005,
@@ -72,7 +72,7 @@ class COMMNET(MALearner):
             q_a = q_out.gather(2, a.unsqueeze(-1).long()).squeeze(-1)
             #shape = tuple(s.shape)
             ##print(shape)
-            #draw_graph(self.q, input_size=shape, expand_nested=True, filename='./diagrams/idqn', save_graph=True)
+            #draw_graph(self.q, input_size=shape, expand_nested=True, filename='./diagrams/commnet', save_graph=True)
 
             # estimate the target value as the discounted q value of the optimal actions in the next states
             max_q_prime = self.q_target(s_prime).max(dim=2)[0]
@@ -103,6 +103,7 @@ class QNet(nn.Module):
         self.set_device()
 
         self.hx_size = 64
+        self.k = 4
 
         for agent_i in range(self.num_agents):
             n_obs = observation_space[agent_i].shape[0]
@@ -112,6 +113,12 @@ class QNet(nn.Module):
                     nn.ReLU(),
                     nn.Linear(128, self.hx_size),
                     nn.ReLU(),
+                ).to(self.device)
+            )
+            setattr(self, 'agent_comm_{}'.format(agent_i), 
+                nn.Sequential(
+                    nn.Linear(2*self.hx_size, self.hx_size),
+                    nn.Tanh(),
                 ).to(self.device)
             )
             setattr(self, 'agent_decode_{}'.format(agent_i), 
@@ -149,6 +156,25 @@ class QNet(nn.Module):
             #print(f"hidden layer team tensor has shape: {hidden.shape}")
             hidden[:, 0 , :, agent_i] = x.squeeze()
         # TODO perform communication between agents
+        
+        for t in range(self.k):
+            next_hidden = torch.empty(obs.shape[0], 1, self.hx_size, self.num_agents)
+            for agent_i in range(self.num_agents):
+                total_comm = torch.sum(hidden, 3)
+                #print(f"total_comm.shape: {total_comm.shape}")
+                #print(f"hidden.shape: {hidden.shape}")
+                comm = (total_comm - hidden[:, :, :, agent_i]) / (self.num_agents-1)
+                #hidden[:, 0, :, agent_i]
+                #print(f"agent returns hidden layer shape: {x.unsqueeze(1).shape}")
+                #print(f"hidden layer team tensor has shape: {hidden.shape}")
+                h = hidden[:, :, :, agent_i]
+                #print(f"comm.shape: {comm.shape}")
+                #print(f"h.shape: {h.shape}")
+                comm_input = torch.cat((h, comm), axis=2)
+                #print(f"comm_input: {comm_input.shape}")
+                x = getattr(self, 'agent_comm_{}'.format(agent_i))(comm_input)
+                next_hidden[:, : , :, agent_i] = x
+            hidden = next_hidden
 
         # TODO extract action probabilities from the resultant resust
         for agent_i in range(self.num_agents):
