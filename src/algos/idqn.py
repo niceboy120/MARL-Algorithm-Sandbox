@@ -33,10 +33,6 @@ class IDQN(MALearner):
     """Independent Deep Q Network
     a trivial MARL algorithm where each agent independently learns state-action
     values by training a seperate deep q network (DQN)
-    
-
-    Args:
-        MALearner (class): The base learner class for MARL algorithms
     """
     def __init__(self, observation_space, action_space, options=default_options):
         super().__init__(observation_space, action_space, options)
@@ -109,18 +105,17 @@ class QNet(nn.Module):
         super(QNet, self).__init__()
         self.num_agents = len(observation_space)
         self.set_device()
-
+        self.networks = nn.ModuleList()
         for agent_i in range(self.num_agents):
             n_obs = observation_space[agent_i].shape[0]
-            setattr(self, 'agent_{}'.format(agent_i), 
-                nn.Sequential(
-                    nn.Linear(n_obs, 128),
-                    nn.ReLU(),
-                    nn.Linear(128, 64),
-                    nn.ReLU(),
-                    nn.Linear(64, action_space[agent_i].n)
-                ).to(self.device)
-            )
+            net = nn.Sequential(
+                nn.Linear(n_obs, 128),
+                nn.ReLU(),
+                nn.Linear(128, 64),
+                nn.ReLU(),
+                nn.Linear(64, action_space[agent_i].n)
+            ).to(self.device)
+            self.networks.append(net)
 
 
     def set_device(self, i=0):
@@ -138,10 +133,8 @@ class QNet(nn.Module):
 
     def forward(self, obs):
         """Forward propogation for the Deep Q Network
-
         Args:
-            obs (_type_): The obseravtions for each agent
-
+            obs (torch.tensor): The obseravtions for each agent, has dim (batch_size, agent_num, obs_size)
         Returns:
             torch.tensor: torch tensor representing action probabilities
         """
@@ -149,23 +142,27 @@ class QNet(nn.Module):
         q_values = [torch.empty(obs.shape[0], ).to(self.device)] * self.num_agents
         for agent_i in range(self.num_agents):
             # print(f"agent_i obs: {obs[:, agent_i, :].shape}")
-            q_values[agent_i] = getattr(self, 'agent_{}'.format(agent_i))(obs[:, agent_i, :].to(self.device)).unsqueeze(1)
+            agent_obs = obs[:, agent_i, :].to(self.device)
+            agent_net = self.networks[agent_i]
+            q_values[agent_i] = agent_net(agent_obs).unsqueeze(1)
 
         return torch.cat(q_values, dim=1)
 
     def sample_action(self, obs, epsilon):
         """Sample an action from the Q-Network using an epsilon greedy policy
-
         Args:
-            obs (list): a list of observations for each agent
+            obs (torch.tensor): The obseravtions for each agent, has dim (batch_size, agent_num, obs_size)
             epsilon (float): 
-
         Returns:
-            _type_: _description_
+            torch.tensor
         """
         out = self.forward(obs)
-        mask = (torch.rand((out.shape[0],)).to(self.device) <= epsilon)
-        action = torch.empty((out.shape[0], out.shape[1],)).to(self.device)
-        action[mask] = torch.randint(0, out.shape[2], action[mask].shape).float().to(self.device)
+        batch_size, agent_num, action_num = out.shape
+
+        # generate a mask to determine which agents should explore or exploit
+        mask = (torch.rand((batch_size,)).to(self.device) <= epsilon)
+
+        action = torch.empty((batch_size, agent_num,)).to(self.device)
+        action[mask] = torch.randint(0, action_num, action[mask].shape).float().to(self.device)
         action[~mask] = out[~mask].argmax(dim=2).float().to(self.device)
         return action
