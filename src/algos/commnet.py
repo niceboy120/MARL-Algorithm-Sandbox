@@ -105,28 +105,31 @@ class QNet(nn.Module):
         self.hx_size = 64
         self.k = 4
 
+        self.encode_nets = nn.ModuleList()
+        self.comm_nets = nn.ModuleList()
+        self.decode_nets = nn.ModuleList()
+
         for agent_i in range(self.num_agents):
             n_obs = observation_space[agent_i].shape[0]
-            setattr(self, 'agent_encode_{}'.format(agent_i), 
-                nn.Sequential(
-                    nn.Linear(n_obs, 128),
-                    nn.ReLU(),
-                    nn.Linear(128, self.hx_size),
-                    nn.ReLU(),
-                ).to(self.device)
-            )
-            setattr(self, 'agent_comm_{}'.format(agent_i), 
-                nn.Sequential(
-                    nn.Linear(2*self.hx_size, self.hx_size),
-                    nn.Tanh(),
-                ).to(self.device)
-            )
-            setattr(self, 'agent_decode_{}'.format(agent_i), 
-                nn.Sequential(
-                    nn.Linear(self.hx_size, action_space[agent_i].n)
-                ).to(self.device)
-            )
 
+            encode_net = nn.Sequential(
+                nn.Linear(n_obs, 128),
+                nn.ReLU(),
+                nn.Linear(128, self.hx_size),
+                nn.ReLU(),
+            ).to(self.device)
+            self.encode_nets.append(encode_net)
+
+            comm_net = nn.Sequential(
+                nn.Linear(2*self.hx_size, self.hx_size),
+                nn.Tanh(),
+            ).to(self.device)
+            self.comm_nets.append(comm_net)
+
+            decode_net = nn.Sequential(
+                nn.Linear(self.hx_size, action_space[agent_i].n)
+            ).to(self.device)
+            self.decode_nets.append(decode_net)
 
     def set_device(self, i=0):
         if torch.cuda.is_available():  
@@ -142,46 +145,40 @@ class QNet(nn.Module):
 
 
     def forward(self, obs):
-        # print(f"obs has shap: {obs.shape}")
         q_values = [torch.empty(obs.shape[0], ).to(self.device)] * self.num_agents
         torch.autograd.set_detect_anomaly(True)
 
-        #hidden = [torch.empty(obs.shape[0], 1, self.hx_size, )] * self.num_agents
         hidden = torch.empty(obs.shape[0], 1, self.hx_size, self.num_agents)
-        # TODO extract hidden layer for all agents
+        # get observation encodings for all the agents
         for agent_i in range(self.num_agents):
+            agent_obs = obs[:, agent_i, :].to(self.device)
+            agent_encode_net = self.encode_nets[agent_i]
 
-            x = getattr(self, 'agent_encode_{}'.format(agent_i))(obs[:, agent_i, :].to(self.device))
-            #print(f"agent returns hidden layer shape: {x.unsqueeze(1).shape}")
-            #print(f"hidden layer team tensor has shape: {hidden.shape}")
+            x = agent_encode_net(agent_obs)
             hidden[:, 0 , :, agent_i] = x.squeeze()
-        # TODO perform communication between agents
-        
+
+        # perform communication between agents
         for t in range(self.k):
             next_hidden = torch.empty(obs.shape[0], 1, self.hx_size, self.num_agents)
             for agent_i in range(self.num_agents):
+                # communication vector is mean of other agents hidden layers
                 total_comm = torch.sum(hidden, 3)
-                #print(f"total_comm.shape: {total_comm.shape}")
-                #print(f"hidden.shape: {hidden.shape}")
-                comm = (total_comm - hidden[:, :, :, agent_i]) / (self.num_agents-1)
-                #hidden[:, 0, :, agent_i]
-                #print(f"agent returns hidden layer shape: {x.unsqueeze(1).shape}")
-                #print(f"hidden layer team tensor has shape: {hidden.shape}")
                 h = hidden[:, :, :, agent_i]
-                #print(f"comm.shape: {comm.shape}")
-                #print(f"h.shape: {h.shape}")
+                comm = (total_comm - h) / (self.num_agents-1)
+
+
                 comm_input = torch.cat((h, comm), axis=2)
-                #print(f"comm_input: {comm_input.shape}")
-                x = getattr(self, 'agent_comm_{}'.format(agent_i))(comm_input)
+                agent_comm_net = self.comm_nets[agent_i]
+                x = agent_comm_net(comm_input)
+
                 next_hidden[:, : , :, agent_i] = x
             hidden = next_hidden
 
-        # TODO extract action probabilities from the resultant resust
+        # extract action preferences from the resultant hidden layers
         for agent_i in range(self.num_agents):
-            #print(f"decode input shape: {hidden[:, 0, :, agent_i].shape}")
+            agent_decode_net = self.decode_nets[agent_i]
 
-            q_values[agent_i] = getattr(self, 'agent_decode_{}'.format(agent_i))(hidden[:, 0, :, agent_i]).unsqueeze(1)
-
+            q_values[agent_i] = agent_decode_net(hidden[:, 0, :, agent_i]).unsqueeze(1)
 
         return torch.cat(q_values, dim=1)
 

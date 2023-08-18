@@ -138,10 +138,8 @@ class QNet(nn.Module):
         Returns:
             torch.tensor: torch tensor representing action probabilities
         """
-        # print(f"obs: {obs.shape}")
         q_values = [torch.empty(obs.shape[0], ).to(self.device)] * self.num_agents
         for agent_i in range(self.num_agents):
-            # print(f"agent_i obs: {obs[:, agent_i, :].shape}")
             agent_obs = obs[:, agent_i, :].to(self.device)
             agent_net = self.networks[agent_i]
             q_values[agent_i] = agent_net(agent_obs).unsqueeze(1)
