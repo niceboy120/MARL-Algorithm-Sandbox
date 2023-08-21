@@ -55,11 +55,10 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_
         epsilon = max(min_epsilon, max_epsilon - (max_epsilon - min_epsilon) * (episode_i / (0.6 * num_episodes)))
         state = np.array(env.reset())
         done = [False for _ in range(env.n_agents)]
+        # perfoms steps according to the policy
+        steps = 0
+        score = 0
         with torch.no_grad():
-            # hidden = learner.init_hidden()
-            # perfoms steps according to the policy
-            steps = 0
-            score = 0
             while not all(done) and steps <= max_steps:
                 #action, hidden = learner.sample_action(torch.Tensor(state).unsqueeze(0), hidden, epsilon)
                 action = learner.sample_action(torch.Tensor(state).unsqueeze(0), epsilon)
@@ -73,38 +72,28 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_
                 steps += 1
                 # increment the state
                 state = np.array(next_state)
-
         learner.per_episode_update(episode_i=episode_i)
-        # print(f"episode: {episode_i}/{num_episodes}: score: {score}, steps: {steps}")
-        # result_data[run_i][episode_i][0] = score
-        # result_data[run_i][episode_i][1] = steps
 
         # log relavent data at every log interval
         if (episode_i + 1) % log_interval == 0:
-            # result_data[run_i][episode_i][0] = score
-            # result_data[run_i][episode_i][1] = steps
             test_score, test_steps = learner.test(test_env, test_episodes)
-            print(f"episode: {episode_i}/{num_episodes}: score: {test_score}, steps: {test_steps}")
-            result_data[episode_i // log_interval, 0] = test_score
-            result_data[episode_i // log_interval, 1] = test_steps
 
-
-        #     print(f"episode: {episode_i}/{num_episodes}: score: {test_score}, steps: {test_steps}")
-        #     result_data[episode_i][0] = score
-        #     result_data[episode_i][1] = steps
             train_score = score / log_interval
-        #     print("#{:<10}/{} episodes , avg train score : {:.1f}, test score: {:.1f}, test steps: {:.1f}, epsilon : {:.1f}"
-        #             .format(episode_i, num_episodes, train_score, test_score, test_steps, epsilon))
+            print(f"episode: {episode_i}/{num_episodes}: train_score: {train_score}, train_steps: {train_steps}, score: {test_score}, steps: {test_steps}")
             if USE_WANDB:
                 wandb.log({'episode': episode_i, 'test-score': test_score, 'buffer-size': learner.memory.size(),
                            'epsilon': epsilon, 'train-score': train_score})
-            score = 0
+            else:
+                result_data[episode_i // log_interval, 0] = test_score
+                result_data[episode_i // log_interval, 1] = test_steps
+            score, steps = 0, 0
 
-    np.save(f"{results_dir}/{algo}_{num_episodes}_{num_runs}_{env_name}.npy", result_data.cpu())
+    if not USE_WANDB:
+        np.save(f"{results_dir}/{algo}_{num_episodes}_{num_runs}_{env_name}.npy", result_data.cpu())
     env.close()
     test_env.close()
 
-
+import threading
 
 if __name__ == '__main__':
     # gather arguments
@@ -115,42 +104,37 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=1, required=False)
     parser.add_argument('--no-recurrent', action='store_true')
     parser.add_argument('--num-episodes', type=int, default=15000, required=False)
+    parser.add_argument('--num-tests', type=int, default=5, required=False)
     parser.add_argument('--num-runs', type=int, default=10, required=False)
     
-    #kwargs = {'env_name': 'ma_gym:Switch2-v1',
     # process arguments
     args = parser.parse_args()
 
 
-    default_options = {
-        'lr': 0.001,
-        'batch_size': 32,
-        'gamma': 0.99,
-        'buffer_limit': 50000,
-        'update_target_interval': 20,
-        'warm_up_steps': 500,
-        'update_iter': 10,
-        'chunk_size': 10,  # if not recurrent, internally, we use chunk_size of 1 and no gru cell is used.
-        'recurrent': True
-    }
+    # create a new thread for each algorithm in each run
+    threads = []
+    for i in range(args.num_runs):
+        for env in ["ma_gym:TrafficJunction4-v0"]:
+            for algo in ["idqn", "vdn", "commnet"]:
+                kwargs= {
+                    'env_name': args.env_name,
+                    'algo': algo,
+                    'results_dir': args.results_dir,
+                    'log_interval': 100,
+                    'num_episodes': args.num_episodes,
+                    'max_epsilon': 0.9,
+                    'min_epsilon': 0.1,
+                    'test_episodes': args.num_tests,
+                    'max_steps': 10000,
+                }
+                # activate wandb if necessary
+                if USE_WANDB:
+                    import wandb
+                    wandb.init(project='marl-algos', config={'algo': args.algo, **kwargs})
 
+                t = threading.Thread(target=main, name=f"{algo}_{env}_{i}", args=(kwargs,))
+                threads.append(t)
 
-    kwargs= {
-        'env_name': args.env_name,
-        'algo': args.algo,
-        'results_dir': args.results_dir,
-        'log_interval': 100,
-        'num_episodes': args.num_episodes,
-        'num_runs': args.num_runs,
-        'max_epsilon': 0.9,
-        'min_epsilon': 0.1,
-        'test_episodes': 10,
-        'max_steps': 10000,
-    }
+    for t in threads:
+        t.start()
 
-    if USE_WANDB:
-        import wandb
-
-        wandb.init(project='marl-algos', config={'algo': args.algo, **kwargs})
-
-    main(**kwargs)
