@@ -18,7 +18,7 @@ from algos.qmix import QMix
 USE_WANDB = True
 
 
-def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_epsilon, min_epsilon, test_episodes, max_steps, options=None):
+def main(env_name, algo, results_dir, log_interval, num_episodes, max_epsilon, min_epsilon, test_episodes, max_steps, options=None):
     env = gym.make(env_name)
     test_env = gym.make(env_name)
 
@@ -79,6 +79,7 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_
             test_score, test_steps = learner.test(test_env, test_episodes)
 
             train_score = score / log_interval
+            train_steps = steps / log_interval
             print(f"episode: {episode_i}/{num_episodes}: train_score: {train_score}, train_steps: {train_steps}, score: {test_score}, steps: {test_steps}")
             if USE_WANDB:
                 wandb.log({'episode': episode_i, 'test-score': test_score, 'buffer-size': learner.memory.size(),
@@ -110,31 +111,23 @@ if __name__ == '__main__':
     # process arguments
     args = parser.parse_args()
 
+    kwargs= {
+        'env_name': args.env_name,
+        'algo': args.algo,
+        'results_dir': args.results_dir,
+        'log_interval': 100,
+        'num_episodes': args.num_episodes,
+        'max_epsilon': 0.9,
+        'min_epsilon': 0.1,
+        'test_episodes': args.num_tests,
+        'max_steps': 10000,
+    }
 
-    # create a new thread for each algorithm in each run
-    threads = []
+    # activate wandb if necessary
+    if USE_WANDB:
+        import wandb
+        wandb.init(project='marl-algos', config={'algo': args.algo, **kwargs})
+
     for i in range(args.num_runs):
-        for env in ["ma_gym:TrafficJunction4-v0"]:
-            for algo in ["idqn", "vdn", "commnet"]:
-                kwargs= {
-                    'env_name': args.env_name,
-                    'algo': algo,
-                    'results_dir': args.results_dir,
-                    'log_interval': 100,
-                    'num_episodes': args.num_episodes,
-                    'max_epsilon': 0.9,
-                    'min_epsilon': 0.1,
-                    'test_episodes': args.num_tests,
-                    'max_steps': 10000,
-                }
-                # activate wandb if necessary
-                if USE_WANDB:
-                    import wandb
-                    wandb.init(project='marl-algos', config={'algo': args.algo, **kwargs})
-
-                t = threading.Thread(target=main, name=f"{algo}_{env}_{i}", args=(kwargs,))
-                threads.append(t)
-
-    for t in threads:
-        t.start()
+        main(**kwargs)
 
