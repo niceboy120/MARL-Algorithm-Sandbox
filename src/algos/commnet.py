@@ -148,7 +148,7 @@ class QNet(nn.Module):
         q_values = [torch.empty(obs.shape[0], ).to(self.device)] * self.num_agents
         torch.autograd.set_detect_anomaly(True)
 
-        hidden = torch.empty(obs.shape[0], 1, self.hx_size, self.num_agents)
+        hidden = torch.empty(obs.shape[0], 1, self.hx_size, self.num_agents).to(self.device)
         # get observation encodings for all the agents
         for agent_i in range(self.num_agents):
             agent_obs = obs[:, agent_i, :].to(self.device)
@@ -159,7 +159,7 @@ class QNet(nn.Module):
 
         # perform communication between agents
         for t in range(self.k):
-            next_hidden = torch.empty(obs.shape[0], 1, self.hx_size, self.num_agents)
+            next_hidden = torch.empty(obs.shape[0], 1, self.hx_size, self.num_agents).to(self.device)
             for agent_i in range(self.num_agents):
                 # communication vector is mean of other agents hidden layers
                 total_comm = torch.sum(hidden, 3)
@@ -167,9 +167,9 @@ class QNet(nn.Module):
                 comm = (total_comm - h) / (self.num_agents-1)
 
 
-                comm_input = torch.cat((h, comm), axis=2)
+                comm_input = torch.cat((h, comm), axis=2).to(self.device)
                 agent_comm_net = self.comm_nets[agent_i]
-                x = agent_comm_net(comm_input)
+                x = agent_comm_net(comm_input).to(self.device)
 
                 next_hidden[:, : , :, agent_i] = x
             hidden = next_hidden
@@ -183,7 +183,7 @@ class QNet(nn.Module):
         return torch.cat(q_values, dim=1)
 
     def sample_action(self, obs, epsilon):
-        out = self.forward(obs)
+        out = self.forward(obs).to(self.device)
         mask = (torch.rand((out.shape[0],)).to(self.device) <= epsilon)
         action = torch.empty((out.shape[0], out.shape[1],)).to(self.device)
         action[mask] = torch.randint(0, out.shape[2], action[mask].shape).float().to(self.device)
