@@ -2,6 +2,7 @@
 # output 
 plots/
 results/
+wandb/
 diagrams/
 
 # Byte-compiled / optimized / DLL files

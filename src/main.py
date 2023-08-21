@@ -15,6 +15,9 @@ from algos.qmix import QMix
 #from algos.commnet import DDPG
 
 
+USE_WANDB = True
+
+
 def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_epsilon, min_epsilon, test_episodes, max_steps, options=None):
     env = gym.make(env_name)
     test_env = gym.make(env_name)
@@ -84,12 +87,18 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, num_runs, max_
             print(f"episode: {episode_i}/{num_episodes}: score: {test_score}, steps: {test_steps}")
             result_data[episode_i // log_interval, 0] = test_score
             result_data[episode_i // log_interval, 1] = test_steps
+
+
         #     print(f"episode: {episode_i}/{num_episodes}: score: {test_score}, steps: {test_steps}")
         #     result_data[episode_i][0] = score
         #     result_data[episode_i][1] = steps
-        #     train_score = score / log_interval
+            train_score = score / log_interval
         #     print("#{:<10}/{} episodes , avg train score : {:.1f}, test score: {:.1f}, test steps: {:.1f}, epsilon : {:.1f}"
         #             .format(episode_i, num_episodes, train_score, test_score, test_steps, epsilon))
+            if USE_WANDB:
+                wandb.log({'episode': episode_i, 'test-score': test_score, 'buffer-size': learner.memory.size(),
+                           'epsilon': epsilon, 'train-score': train_score})
+            score = 0
 
     np.save(f"{results_dir}/{algo}_{num_episodes}_{num_runs}_{env_name}.npy", result_data.cpu())
     env.close()
@@ -138,5 +147,10 @@ if __name__ == '__main__':
         'test_episodes': 10,
         'max_steps': 10000,
     }
+
+    if USE_WANDB:
+        import wandb
+
+        wandb.init(project='marl-algos', config={'algo': args.algo, **kwargs})
 
     main(**kwargs)
