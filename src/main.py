@@ -12,10 +12,9 @@ from algos.commnet import COMMNET
 from algos.maddpg import MADDPG
 from algos.qmix import QMix
 
-#from algos.commnet import DDPG
-
-
 USE_WANDB = True
+if USE_WANDB:
+    import wandb
 
 
 def main(env_name, algo, results_dir, log_interval, num_episodes, max_epsilon, min_epsilon, test_episodes, max_steps, options=None):
@@ -123,11 +122,10 @@ if __name__ == '__main__':
         'max_steps': 10000,
     }
 
-    # activate wandb if necessary
-    if USE_WANDB:
-        import wandb
-        wandb.init(project='marl-algos', config={'algo': args.algo, **kwargs})
 
     for i in range(args.num_runs):
+        # activate wandb if necessary
+        if USE_WANDB:
+            wandb.init(project='marl-algos', reinit=True, monitor_gym=True, group=args.algo, config={**kwargs})
         main(**kwargs)
 
