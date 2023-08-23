@@ -50,13 +50,13 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, max_epsilon, m
     # for run_i in range(num_runs):
     #     print(f"performing run: {run_i}")
     # perfom each episode
+
+    steps, score = 0, 0
     for episode_i in range(num_episodes):
         epsilon = max(min_epsilon, max_epsilon - (max_epsilon - min_epsilon) * (episode_i / (0.6 * num_episodes)))
         state = np.array(env.reset())
         done = [False for _ in range(env.n_agents)]
         # perfoms steps according to the policy
-        steps = 0
-        score = 0
         with torch.no_grad():
             while not all(done) and steps <= max_steps:
                 #action, hidden = learner.sample_action(torch.Tensor(state).unsqueeze(0), hidden, epsilon)
