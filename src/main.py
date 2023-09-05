@@ -9,6 +9,8 @@ import torch.nn.functional as F
 from algos.vdn import VDN
 from algos.idqn import IDQN
 from algos.commnet import COMMNET
+from algos.ic3net import IC3NET
+from algos.g2anet import G2ANET
 from algos.maddpg import MADDPG
 from algos.qmix import QMix
 
@@ -28,6 +30,10 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, max_epsilon, m
             learner = VDN(env.observation_space, env.action_space)
         case "commnet":
             learner = COMMNET(env.observation_space, env.action_space)
+        case "ic3net":
+            learner = IC3NET(env.observation_space, env.action_space)
+        case "g2anet":
+            learner = G2ANET(env.observation_space, env.action_space)
         case "maddpg":
             learner = MADDPG(env.observation_space, env.action_space)
         case "qmix":
@@ -127,5 +133,6 @@ if __name__ == '__main__':
         # activate wandb if necessary
         if USE_WANDB:
             wandb.init(project='marl-algos', reinit=True, monitor_gym=True, group=args.algo, config={**kwargs})
+        # call the main process for each run
         main(**kwargs)
 
