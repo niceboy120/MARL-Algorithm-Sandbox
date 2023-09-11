@@ -6,7 +6,7 @@ default_options = {
     'gamma': 0.99,
     'buffer_limit': 50000,
     'update_target_interval': 20,
-    'warm_up_steps': 500,
+    'warm_up_steps': 2000,
     'update_iter': 10,
     'chunk_size': 10,  # if not recurrent, internally, we use chunk_size of 1 and no gru cell is used.
     'recurrent': False

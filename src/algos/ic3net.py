@@ -185,6 +185,7 @@ class QNet(nn.Module):
             x = agent_gate_net(agent_e)
 
             gates[:, :, i] = x.squeeze()
+        #print(gates)
 
         ## TODO cleanup
         # perform communication between agents
@@ -202,6 +203,8 @@ class QNet(nn.Module):
             # communication vector is mean of other agents hidden layers
             #total_comm = torch.sum(hidden, 3)
             total_comm = torch.zeros(batch_size, 1, self.hx_size).to(self.device)
+
+            contrib_agent_count = 0
             for j in range(self.num_agents):
                 # get a 1 or 0 based on agent j's gate to either communicate or not
                 g_j = gates[:, :, j].squeeze().flatten().tolist()
@@ -218,8 +221,12 @@ class QNet(nn.Module):
                 #should_communicate = np.random.choice([True, False], p=g_j)
 
                 if j != i and should_communicate:
+                    contrib_agent_count += 1
                     total_comm = torch.add(total_comm, hidden[:, :, :, j]).to(self.device)
-            comm = total_comm / (self.num_agents-1)
+            if contrib_agent_count != 0:
+                comm = total_comm / contrib_agent_count
+            else:
+                comm = total_comm
 
 
             comm_input = torch.cat((h_i, comm), axis=2).to(self.device)

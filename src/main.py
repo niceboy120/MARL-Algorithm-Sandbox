@@ -87,8 +87,15 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, max_epsilon, m
             train_steps = steps / log_interval
             print(f"episode: {episode_i}/{num_episodes}: train_score: {train_score}, train_steps: {train_steps}, score: {test_score}, steps: {test_steps}")
             if USE_WANDB:
-                wandb.log({'episode': episode_i, 'test-score': test_score, 'buffer-size': learner.memory.size(),
-                           'epsilon': epsilon, 'train-score': train_score})
+                wandb.log({
+                    'episode': episode_i, 
+                    'test-score': test_score, 
+                    'test-steps': test_steps, 
+                    'train-score': train_score,
+                    'train-steps': train_steps,
+                    'buffer-size': learner.memory.size(),
+                    'epsilon': epsilon
+                })
             else:
                 result_data[episode_i // log_interval, 0] = test_score
                 result_data[episode_i // log_interval, 1] = test_steps
