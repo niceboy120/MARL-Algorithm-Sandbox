@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from common.replay_buffer import ReplayBuffer
-
 import numpy as np
 
 from common.learner import MALearner
@@ -17,7 +16,7 @@ default_options = {
     'gamma': 0.99,
     'buffer_limit': 50000,
     'update_target_interval': 20,
-    'warm_up_steps': 500,
+    'warm_up_steps': 2000,
     'update_iter': 10,
     'chunk_size': 10,  # if not recurrent, internally, we use chunk_size of 1 and no gru cell is used.
     'recurrent': True
@@ -133,18 +132,18 @@ class QNet(nn.Module):
                     nn.Linear(n_obs, 64),
                     nn.ReLU(),
                     nn.Linear(64, self.hx_size),
-                    nn.ReLU(),
-                    nn.GRUCell(self.hx_size, self.hx_size),
-                    nn.Linear(self.hx_size, action_space[agent_i].n)
+                    nn.ReLU()
+                    #nn.GRUCell(self.hx_size, self.hx_size),
+                    #nn.Linear(self.hx_size, action_space[agent_i].n)
                 ).to(self.device)
             )
             # if recurrent:
             #     setattr(self, 'agent_gru_{}'.format(agent_i), 
             #         nn.GRUCell(self.hx_size, self.hx_size)
             #     )
-            # setattr(self, 'agent_q_{}'.format(agent_i), 
-            #     nn.Linear(self.hx_size, action_space[agent_i].n)
-            # )
+            setattr(self, 'agent_q_{}'.format(agent_i), 
+                 nn.Linear(self.hx_size, action_space[agent_i].n)
+            )
             
 
     def set_device(self, i=0):
@@ -163,12 +162,12 @@ class QNet(nn.Module):
         q_values = [torch.empty(obs.shape[0], ).to(self.device)] * self.num_agents
         # next_hidden = [torch.empty(obs.shape[0], 1, self.hx_size)] * self.num_agents
         for agent_i in range(self.num_agents):
-            # x = getattr(self, 'agent_feature_{}'.format(agent_i))(obs[:, agent_i, :])
+            x = getattr(self, 'agent_feature_{}'.format(agent_i))(obs[:, agent_i, :])
             # if self.recurrent:
             #     x = getattr(self, 'agent_gru_{}'.format(agent_i))(x, hidden[:, agent_i, :])
             #     next_hidden[agent_i] = x.unsqueeze(1)
-            # q_values[agent_i] = getattr(self, 'agent_q_{}'.format(agent_i))(x).unsqueeze(1)
-            q_values[agent_i] = getattr(self, 'agent_feature_{}'.format(agent_i))(obs[:, agent_i, :].to(self.device)).unsqueeze(1)
+            q_values[agent_i] = getattr(self, 'agent_q_{}'.format(agent_i))(x).unsqueeze(1)
+            #q_values[agent_i] = getattr(self, 'agent_feature_{}'.format(agent_i))(obs[:, agent_i, :].to(self.device)).unsqueeze(1)
 
         #return torch.cat(q_values, dim=1), torch.cat(next_hidden, dim=1)
         return torch.cat(q_values, dim=1).to(self.device)
