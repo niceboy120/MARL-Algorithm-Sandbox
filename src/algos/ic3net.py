@@ -17,7 +17,7 @@ from torchview import draw_graph
 default_options = {
     'lr': 0.0005,
     'k': 1, # number of communication steps
-    'batch_size': 32,
+    'batch_size': 1,
     'gamma': 0.99,
     'buffer_limit': 50000,
     'log_interval': 20,
@@ -45,9 +45,6 @@ class IC3NET(MALearner):
 
         # tell the optimizer to update the network parameters at the lr
         self.optimizer = optim.Adam(self.q.parameters(), lr=self.lr)
-
-    def init_hidden(self):
-        pass
 
     def sample_action(self, obs, epsilon):
         return self.q.sample_action(obs, epsilon)
@@ -109,9 +106,16 @@ class QNet(nn.Module):
 
         self.encode_nets = nn.ModuleList()
         self.gate_nets = nn.ModuleList()
+
         self.lstm_nets = nn.ModuleList()
+        self.shared_lstm = nn.LSTM(self.hx_size, self.hx_size).to(self.device)
+
         self.comm_nets = nn.ModuleList()
         self.decode_nets = nn.ModuleList()
+
+        self.lstm_s = torch.zeros((1, 1, self.hx_size, self.num_agents)).to(self.device).detach()
+        self.lstm_h = torch.zeros((1, 1, self.hx_size, self.num_agents)).to(self.device).detach()
+        self.comm = torch.zeros(1, 1, self.hx_size, self.num_agents).to(self.device).detach()
 
         for agent_i in range(self.num_agents):
             n_obs = observation_space[agent_i].shape[0]
@@ -132,9 +136,7 @@ class QNet(nn.Module):
             ).to(self.device)
             self.gate_nets.append(gate_net)
 
-            lstm_net = nn.Sequential(
-                nn.LSTM(2*self.hx_size, self.hx_size),
-            ).to(self.device)
+            lstm_net = nn.LSTM(self.hx_size, self.hx_size).to(self.device)
             self.lstm_nets.append(lstm_net)
 
             comm_net = nn.Sequential(
@@ -167,80 +169,72 @@ class QNet(nn.Module):
         q_values = [torch.empty(batch_size, ).to(self.device)] * self.num_agents
         torch.autograd.set_detect_anomaly(True)
 
-        hidden = torch.empty(batch_size, 1, self.hx_size, self.num_agents).to(self.device)
         # get observation encodings for all the agents
+        encodings = torch.empty(batch_size, 1, self.hx_size, self.num_agents).to(self.device)
         for agent_i in range(self.num_agents):
             agent_obs = obs[:, agent_i, :].to(self.device)
             agent_encode_net = self.encode_nets[agent_i]
-
             x = agent_encode_net(agent_obs)
-            hidden[:, 0 , :, agent_i] = x.squeeze()
+            encodings[:, 0 , :, agent_i] = x.squeeze()
 
         # get the gating for this layer
         gates = torch.empty(batch_size, 2, self.num_agents).to(self.device)
         for i in range(self.num_agents):
-            agent_e = hidden[:, :, :, i]
-
             agent_gate_net = self.gate_nets[i]
-            x = agent_gate_net(agent_e)
-
+            x = agent_gate_net(self.lstm_h[:, :, :, i])
             gates[:, :, i] = x.squeeze()
-        #print(gates)
 
-        ## TODO cleanup
-        # perform communication between agents
-        next_hidden = torch.empty(batch_size, 1, self.hx_size, self.num_agents).to(self.device)
+        # pass the encodings through the lstm
+        next_lstm_h = torch.empty(batch_size, 1, self.hx_size, self.num_agents).to(self.device)
+        next_lstm_s = torch.empty(batch_size, 1, self.hx_size, self.num_agents).to(self.device)
+        hidden = torch.empty(batch_size, 1, self.hx_size, self.num_agents).to(self.device)
         for i in range(self.num_agents):
 
+            e_i = encodings[:, :, :, i]
+            c_i = self.comm[:, :, :, i]
+            e_c_sum = torch.add(e_i, c_i).detach()
+
+            l_h = self.lstm_h[:, :, :, i].detach()
+            l_s = self.lstm_s[:, :, :, i].detach()
+            #lstm = self.lstm_nets[i]
+
+            #x, (hn, sn) = self.shared_lstm( e_c_sum , (l_h, l_s))
+            x, (hn, sn) = self.shared_lstm( e_c_sum.detach() , (l_h.detach(), l_s.detach()))
+            next_lstm_h[:, :, :, i]  = hn
+            next_lstm_s[:, :, :, i]  = sn
+            self.shared_lstm_h = hn
+            self.shared_lstm_s = sn
+
+            hidden[:, 0 , :, i] = x.squeeze()
+
+        self.lstm_h = next_lstm_h
+        self.lstm_s = next_lstm_s
+
+        #hidden = encodings
+
+        # perform communication between agents
+        for i in range(self.num_agents):
             h_i = hidden[:, :, :, i]
-
-
-            """mask = (torch.rand((out.shape[0],)).to(self.device) <= epsilon)
-            action = torch.empty((out.shape[0], out.shape[1],)).to(self.device)
-            action[mask] = torch.randint(0, out.shape[2], action[mask].shape).float().to(self.device)
-            action[~mask] = out[~mask].argmax(dim=2).float().to(self.device)"""
-
             # communication vector is mean of other agents hidden layers
-            #total_comm = torch.sum(hidden, 3)
             total_comm = torch.zeros(batch_size, 1, self.hx_size).to(self.device)
-
             contrib_agent_count = 0
             for j in range(self.num_agents):
                 # get a 1 or 0 based on agent j's gate to either communicate or not
-                g_j = gates[:, :, j].squeeze().flatten().tolist()
-                #print(f"g_j has size: {g_j}")
-                #print(f"sums to: {sum(g_j)}")
-                g_j = np.array(g_j)
-                #if sum(g_j) != 1.0:
-                #    g_j = g_j / sum(g_j)
-                #print(f"sums to: {sum(g_j)}")
-                #print(g_j[0])
+                g_j = torch.argmax(gates[:, :, j].squeeze().flatten())
 
-                # TODO make act selection as indicated by the gate value
-                should_communicate = random.random() >= g_j[0]
-                #should_communicate = np.random.choice([True, False], p=g_j)
-
-                if j != i and should_communicate:
+                # make act selection as indicated by the gate value
+                if j != i:
                     contrib_agent_count += 1
-                    total_comm = torch.add(total_comm, hidden[:, :, :, j]).to(self.device)
+                    total_comm = torch.add(total_comm, torch.mul(hidden[:, :, :, j], g_j)).to(self.device)
             if contrib_agent_count != 0:
                 comm = total_comm / contrib_agent_count
             else:
                 comm = total_comm
-
-
-            comm_input = torch.cat((h_i, comm), axis=2).to(self.device)
-            agent_comm_net = self.comm_nets[i]
-            x = agent_comm_net(comm_input).to(self.device)
-
-            next_hidden[:, : , :, i] = x
-        hidden = next_hidden
-
+            self.comm[:, :, :, i] = comm
 
         # extract action preferences from the resultant hidden layers
         for agent_i in range(self.num_agents):
             agent_decode_net = self.decode_nets[agent_i]
-
             q_values[agent_i] = agent_decode_net(hidden[:, 0, :, agent_i]).unsqueeze(1)
 
         return torch.cat(q_values, dim=1).to(self.device)
@@ -249,8 +243,10 @@ class QNet(nn.Module):
 
     def sample_action(self, obs, epsilon):
         out = self.forward(obs).to(self.device)
+
         mask = (torch.rand((out.shape[0],)).to(self.device) <= epsilon)
         action = torch.empty((out.shape[0], out.shape[1],)).to(self.device)
         action[mask] = torch.randint(0, out.shape[2], action[mask].shape).float().to(self.device)
         action[~mask] = out[~mask].argmax(dim=2).float().to(self.device)
+
         return action
