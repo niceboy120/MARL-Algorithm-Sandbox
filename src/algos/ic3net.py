@@ -60,6 +60,9 @@ class IC3NET(MALearner):
         if episode_i % self.update_target_interval:
             self.q_target.load_state_dict(self.q.state_dict())
 
+    def get_gates(self):
+        return self.q_target.gates
+
 
     def train(self, gamma, batch_size, update_iter=10):
         for _ in range(update_iter):
@@ -106,6 +109,8 @@ class QNet(nn.Module):
 
         self.encode_nets = nn.ModuleList()
         self.gate_nets = nn.ModuleList()
+
+        self.gates = torch.empty(self.num_agents).to(self.device)
 
         self.lstm_nets = nn.ModuleList()
         self.shared_lstm = nn.LSTM(self.hx_size, self.hx_size).to(self.device)
@@ -178,11 +183,10 @@ class QNet(nn.Module):
             encodings[:, 0 , :, agent_i] = x.squeeze()
 
         # get the gating for this layer
-        gates = torch.empty(batch_size, 2, self.num_agents).to(self.device)
         for i in range(self.num_agents):
             agent_gate_net = self.gate_nets[i]
             x = agent_gate_net(self.lstm_h[:, :, :, i])
-            gates[:, :, i] = x.squeeze()
+            self.gates[i] = torch.argmax(x.squeeze().squeeze().flatten())
 
         # pass the encodings through the lstm
         next_lstm_h = torch.empty(batch_size, 1, self.hx_size, self.num_agents).to(self.device)
@@ -208,6 +212,7 @@ class QNet(nn.Module):
         self.lstm_h = next_lstm_h
         self.lstm_s = next_lstm_s
 
+
         # perform communication between agents
         for i in range(self.num_agents):
             h_i = hidden[:, :, :, i]
@@ -216,7 +221,7 @@ class QNet(nn.Module):
             contrib_agent_count = 0
             for j in range(self.num_agents):
                 # get a 1 or 0 based on agent j's gate to either communicate or not
-                g_j = torch.argmax(gates[:, :, j].squeeze().flatten())
+                g_j = self.gates[j]
 
                 # make act selection as indicated by the gate value
                 if j != i:

@@ -86,6 +86,7 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, max_epsilon, m
             train_score = score / log_interval
             train_steps = steps / log_interval
             print(f"episode: {episode_i}/{num_episodes}: train_score: {train_score}, train_steps: {train_steps}, score: {test_score}, steps: {test_steps}")
+            print(learner.get_gates())
             if USE_WANDB:
                 wandb.log({
                     'episode': episode_i, 
