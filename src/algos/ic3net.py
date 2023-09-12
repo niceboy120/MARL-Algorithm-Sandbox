@@ -194,11 +194,9 @@ class QNet(nn.Module):
             c_i = self.comm[:, :, :, i]
             e_c_sum = torch.add(e_i, c_i).detach()
 
-            l_h = self.lstm_h[:, :, :, i].detach()
-            l_s = self.lstm_s[:, :, :, i].detach()
-            #lstm = self.lstm_nets[i]
+            l_h = self.lstm_h[:, :, :, i].contiguous().detach()
+            l_s = self.lstm_s[:, :, :, i].contiguous().detach()
 
-            #x, (hn, sn) = self.shared_lstm( e_c_sum , (l_h, l_s))
             x, (hn, sn) = self.shared_lstm( e_c_sum.detach() , (l_h.detach(), l_s.detach()))
             next_lstm_h[:, :, :, i]  = hn
             next_lstm_s[:, :, :, i]  = sn
@@ -209,8 +207,6 @@ class QNet(nn.Module):
 
         self.lstm_h = next_lstm_h
         self.lstm_s = next_lstm_s
-
-        #hidden = encodings
 
         # perform communication between agents
         for i in range(self.num_agents):
