@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from algos.vdn import VDN
 from algos.idqn import IDQN
 from algos.commnet import COMMNET
+from algos.commnet_range import COMMNET_RANGE
 from algos.ic3net import IC3NET
 from algos.g2anet import G2ANET
 from algos.maddpg import MADDPG
@@ -19,7 +20,7 @@ if USE_WANDB:
     import wandb
 
 
-def main(env_name, algo, results_dir, log_interval, num_episodes, max_epsilon, min_epsilon, test_episodes, max_steps, options=None):
+def main(env_name, algo, results_dir, log_interval, num_episodes, neighborhood, max_epsilon, min_epsilon, test_episodes, max_steps, options=None):
     env = gym.make(env_name)
     test_env = gym.make(env_name)
 
@@ -30,6 +31,8 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, max_epsilon, m
             learner = VDN(env.observation_space, env.action_space)
         case "commnet":
             learner = COMMNET(env.observation_space, env.action_space)
+        case "commnet_range":
+            learner = COMMNET_RANGE(env.observation_space, env.action_space, neighborhood)
         case "ic3net":
             learner = IC3NET(env.observation_space, env.action_space)
         case "g2anet":
@@ -86,7 +89,6 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, max_epsilon, m
             train_score = score / log_interval
             train_steps = steps / log_interval
             print(f"episode: {episode_i}/{num_episodes}: train_score: {train_score}, train_steps: {train_steps}, score: {test_score}, steps: {test_steps}")
-            print(learner.get_gates())
             if USE_WANDB:
                 wandb.log({
                     'episode': episode_i, 
@@ -117,6 +119,7 @@ if __name__ == '__main__':
     parser.add_argument('--results-dir', required=False, default='./results')
     parser.add_argument('--seed', type=int, default=1, required=False)
     parser.add_argument('--no-recurrent', action='store_true')
+    parser.add_argument('--neighborhood', default=1)
     parser.add_argument('--num-episodes', type=int, default=15000, required=False)
     parser.add_argument('--num-tests', type=int, default=5, required=False)
     parser.add_argument('--num-runs', type=int, default=10, required=False)
@@ -130,6 +133,7 @@ if __name__ == '__main__':
         'results_dir': args.results_dir,
         'log_interval': 100,
         'num_episodes': args.num_episodes,
+        'neighborhood': int(args.neighborhood),
         'max_epsilon': 0.9,
         'min_epsilon': 0.1,
         'test_episodes': args.num_tests,
