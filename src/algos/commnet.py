@@ -15,7 +15,7 @@ from torchview import draw_graph
 default_options = {
     'lr': 0.0005,
     'k': 1, # number of communication steps
-    'batch_size': 32,
+    'batch_size': 1,
     'gamma': 0.99,
     'buffer_limit': 50000,
     'log_interval': 20,

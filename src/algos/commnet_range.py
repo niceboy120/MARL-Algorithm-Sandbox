@@ -14,7 +14,7 @@ from torchview import draw_graph
 default_options = {
     'lr': 0.0005,
     'k': 1, # number of communication steps
-    'batch_size': 1,
+    'batch_size': 32,
     'gamma': 0.99,
     'buffer_limit': 50000,
     'log_interval': 20,
@@ -99,12 +99,12 @@ class QNet(nn.Module):
         """
         super(QNet, self).__init__()
         self.num_agents = len(observation_space)
-        self.agent_pos = [(0,0) for _ in range(self.num_agents)]
+        #self.agent_pos = [(0,0) for _ in range(self.num_agents)]
 
         self.set_device()
 
         self.hx_size = 64
-        self.k = 4
+        self.k = 1
 
         self.grid_size = (3, 7)
         self.neighborhood = neighborhood
@@ -150,76 +150,96 @@ class QNet(nn.Module):
 
     def obs_to_pos(self, obs):
         X, Y = self.grid_size
-        scaled_x, scaled_y = obs.flatten().tolist()
-        return [round(scaled_x * (X-1)), round(scaled_y * (Y-1))]
+        scales = torch.tensor([float(X-1), float(Y-1)]).to(self.device)
+        return torch.mul(obs, scales)
 
     def manhatten_dist(self, pos1, pos2):
         return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
 
-    def get_neighbors(self, agent_i):
-        res = []
-        pos_i = self.agent_pos[agent_i]
-        for j, pos_j in enumerate(self.agent_pos):
-            if j != agent_i:
-                d = self.manhatten_dist(pos_i, pos_j)
-                if d <= self.neighborhood:
-                    res.append(j)
-        return res
+    def get_communications(self, agent_pos, hidden):
+        #print(agent_pos.size())
+        #print(f"agent positions: {agent_pos}")
+        #print(hidden.size())
+
+        batch_size = hidden.shape[0]
+        mask = torch.zeros(batch_size, self.num_agents).to(self.device)
+
+        # distances between each pair of agents (p=1.0 for manhatten distance)
+        dists = torch.cdist(agent_pos, agent_pos, p=1.0).to(self.device)
+        #print(f"distance: {dists}")
+        # mask represeting other agents which are within the neighborhood of a given agent
+        mask = torch.where(dists > 0.0, dists, float('inf')).to(self.device)
+        mask = torch.where(mask < self.neighborhood, 1.0, 0.0).to(self.device)
+        #print(f"mask: {mask}")
+        #print(f"mask_size: {mask.size()}")
+        #print(f"hidden_size: {hidden.size()}")
+
+        total_comms = torch.empty(batch_size, self.hx_size, self.num_agents).to(self.device)
+        comms = torch.empty(batch_size, self.hx_size, self.num_agents).to(self.device)
+        for i in range(self.num_agents):
+            mask_i = mask[:, i, :]
+            #print(f"mask_i for agent {i} is: {mask_i}")
+            J = mask_i.sum(dim=1)
+            J = torch.where(J > 0.0, J, 1.0)
+            #print(f"contributing agents is: {J}")
+            #print(f"mask_i_size: {mask_i.size()}")
+            #print(f"hidden_size: {hidden.size()}")
+            for b in range(batch_size):
+                total_comms[b, :, i] = torch.inner(mask[b, i, :], hidden[b, :, :])
+            #print(f"J_size: {J.size()}")
+            #print(f"total_comms_size: {total_comms.size()}")
+            comms[:, :, i] = torch.matmul((1/J), total_comms[:, :, i])
+        #print(f"comms: {comms}")
+        return comms
 
 
     def forward(self, obs):
         q_values = [torch.empty(obs.shape[0], ).to(self.device)] * self.num_agents
         torch.autograd.set_detect_anomaly(True)
 
-        hidden = torch.empty(obs.shape[0], 1, self.hx_size, self.num_agents).to(self.device)
+        hidden = torch.empty(obs.shape[0], self.hx_size, self.num_agents).to(self.device)
         # get observation encodings for all the agents
+        
+        # get agent position tensor
+        agent_pos = self.obs_to_pos(obs)
+
         #print(f" we have obs: {obs}")
         for agent_i in range(self.num_agents):
             agent_obs = obs[:, agent_i, :].to(self.device)
             #print(f"for agent:{agent_i} we have obs: {agent_obs}")
 
             # update the agent position info
-            self.agent_pos[agent_i] = self.obs_to_pos(agent_obs)
+            #self.agent_pos[:, agent_i] = self.obs_to_pos(agent_obs)
             agent_encode_net = self.encode_nets[agent_i]
 
             x = agent_encode_net(agent_obs)
-            hidden[:, 0 , :, agent_i] = x.squeeze()
+            hidden[:, :, agent_i] = x.squeeze()
         #print(f" we have positions: {self.agent_pos}")
 
         # perform communication between agents
         for t in range(self.k):
-            next_hidden = torch.empty(obs.shape[0], 1, self.hx_size, self.num_agents).to(self.device)
+            next_hidden = torch.empty(obs.shape[0], self.hx_size, self.num_agents).to(self.device)
 
-
+            comms = self.get_communications(agent_pos, hidden)
 
             for agent_i in range(self.num_agents):
+                h = hidden[:, :, agent_i]
+
                 # communication vector is mean of other agents hidden layers
+                comm = comms[:, :, agent_i]
 
-                total_comm = torch.zeros(obs.shape[0], 1, self.hx_size).to(self.device)
-                neis = self.get_neighbors(agent_i)
-                print(f"neighborhood is : {self.neighborhood}")
-                for agent_j in neis:
-                    h_j = hidden[:, :, :, agent_j]
-                    torch.add(total_comm, h_j)
-
-                h = hidden[:, :, :, agent_i]
-                if len(neis) > 0:
-                    comm = total_comm / len(neis)
-                else:
-                    comm = total_comm
-
-                comm_input = torch.cat((h, comm), axis=2).to(self.device)
+                comm_input = torch.cat((h, comm), axis=1).to(self.device)
                 agent_comm_net = self.comm_nets[agent_i]
                 x = agent_comm_net(comm_input).to(self.device)
 
-                next_hidden[:, : , :, agent_i] = x
+                next_hidden[:, :, agent_i] = x
             hidden = next_hidden
 
         # extract action preferences from the resultant hidden layers
         for agent_i in range(self.num_agents):
             agent_decode_net = self.decode_nets[agent_i]
 
-            q_values[agent_i] = agent_decode_net(hidden[:, 0, :, agent_i]).unsqueeze(1)
+            q_values[agent_i] = agent_decode_net(hidden[:, :, agent_i]).unsqueeze(1)
 
         return torch.cat(q_values, dim=1)
 
