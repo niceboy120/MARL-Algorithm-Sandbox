@@ -153,93 +153,73 @@ class QNet(nn.Module):
         scales = torch.tensor([float(X-1), float(Y-1)]).to(self.device)
         return torch.mul(obs, scales)
 
-    def manhatten_dist(self, pos1, pos2):
-        return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
-
-    def get_communications(self, agent_pos, hidden):
-        #print(agent_pos.size())
-        #print(f"agent positions: {agent_pos}")
-        #print(hidden.size())
-
-        batch_size = hidden.shape[0]
-        mask = torch.zeros(batch_size, self.num_agents).to(self.device)
-
+    def get_nei_mask(self, obs):
+        agent_pos = self.obs_to_pos(obs)
+        mask = torch.zeros(obs.shape[0], self.num_agents).to(self.device)
         # distances between each pair of agents (p=1.0 for manhatten distance)
         dists = torch.cdist(agent_pos, agent_pos, p=1.0).to(self.device)
-        #print(f"distance: {dists}")
         # mask represeting other agents which are within the neighborhood of a given agent
         mask = torch.where(dists > 0.0, dists, float('inf')).to(self.device)
         mask = torch.where(mask < self.neighborhood, 1.0, 0.0).to(self.device)
-        #print(f"mask: {mask}")
-        #print(f"mask_size: {mask.size()}")
-        #print(f"hidden_size: {hidden.size()}")
+        return mask
 
-        total_comms = torch.empty(batch_size, self.hx_size, self.num_agents).to(self.device)
-        comms = torch.empty(batch_size, self.hx_size, self.num_agents).to(self.device)
+    def get_communications(self, mask, hidden):
+        batch_size = hidden.shape[0]
+        hx_size = hidden.shape[2]
+
+        total_comms = torch.empty(batch_size, self.num_agents, hx_size).to(self.device)
+        comms = torch.empty(batch_size, self.num_agents, hx_size).to(self.device)
         for i in range(self.num_agents):
             mask_i = mask[:, i, :]
-            #print(f"mask_i for agent {i} is: {mask_i}")
             J = mask_i.sum(dim=1)
             J = torch.where(J > 0.0, J, 1.0)
-            #print(f"contributing agents is: {J}")
-            #print(f"mask_i_size: {mask_i.size()}")
-            #print(f"hidden_size: {hidden.size()}")
             for b in range(batch_size):
-                total_comms[b, :, i] = torch.inner(mask[b, i, :], hidden[b, :, :])
-            #print(f"J_size: {J.size()}")
-            #print(f"total_comms_size: {total_comms.size()}")
-            comms[:, :, i] = torch.matmul((1/J), total_comms[:, :, i])
-        #print(f"comms: {comms}")
+                total_comms[b, i, :] = torch.inner(mask[b, i, :], hidden.permute(0,2,1)[b, :, :])
+                comms[b, i, :] = torch.mul(total_comms[b, i, :], (1/J[b]))
         return comms
-
 
     def forward(self, obs):
         q_values = [torch.empty(obs.shape[0], ).to(self.device)] * self.num_agents
         torch.autograd.set_detect_anomaly(True)
 
-        hidden = torch.empty(obs.shape[0], self.hx_size, self.num_agents).to(self.device)
+        hidden = torch.empty(obs.shape[0], self.num_agents, self.hx_size).to(self.device)
         # get observation encodings for all the agents
         
-        # get agent position tensor
-        agent_pos = self.obs_to_pos(obs)
+        # get neighbor hook mask tensor
+        mask = self.get_nei_mask(obs)
 
-        #print(f" we have obs: {obs}")
         for agent_i in range(self.num_agents):
             agent_obs = obs[:, agent_i, :].to(self.device)
-            #print(f"for agent:{agent_i} we have obs: {agent_obs}")
 
             # update the agent position info
-            #self.agent_pos[:, agent_i] = self.obs_to_pos(agent_obs)
             agent_encode_net = self.encode_nets[agent_i]
 
             x = agent_encode_net(agent_obs)
-            hidden[:, :, agent_i] = x.squeeze()
-        #print(f" we have positions: {self.agent_pos}")
+            hidden[:, agent_i, :] = x.squeeze()
 
         # perform communication between agents
         for t in range(self.k):
-            next_hidden = torch.empty(obs.shape[0], self.hx_size, self.num_agents).to(self.device)
+            next_hidden = torch.empty(obs.shape[0], self.num_agents, self.hx_size).to(self.device)
 
-            comms = self.get_communications(agent_pos, hidden)
+            comms = self.get_communications(mask, hidden)
 
             for agent_i in range(self.num_agents):
-                h = hidden[:, :, agent_i]
+                h = hidden[:, agent_i, :]
 
                 # communication vector is mean of other agents hidden layers
-                comm = comms[:, :, agent_i]
+                comm = comms[:, agent_i, :]
 
                 comm_input = torch.cat((h, comm), axis=1).to(self.device)
                 agent_comm_net = self.comm_nets[agent_i]
                 x = agent_comm_net(comm_input).to(self.device)
 
-                next_hidden[:, :, agent_i] = x
+                next_hidden[:, agent_i, :] = x
             hidden = next_hidden
 
         # extract action preferences from the resultant hidden layers
         for agent_i in range(self.num_agents):
             agent_decode_net = self.decode_nets[agent_i]
-
-            q_values[agent_i] = agent_decode_net(hidden[:, :, agent_i]).unsqueeze(1)
+            q_values[agent_i] = agent_decode_net(hidden[:, agent_i, :]).unsqueeze(1)
 
         return torch.cat(q_values, dim=1)
 
