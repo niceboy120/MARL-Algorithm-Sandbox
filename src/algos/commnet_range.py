@@ -167,15 +167,20 @@ class QNet(nn.Module):
         batch_size = hidden.shape[0]
         hx_size = hidden.shape[2]
 
-        total_comms = torch.empty(batch_size, self.num_agents, hx_size).to(self.device)
         comms = torch.empty(batch_size, self.num_agents, hx_size).to(self.device)
         for i in range(self.num_agents):
             mask_i = mask[:, i, :]
+            # coefficent tensor for averaging across whole batch
             J = mask_i.sum(dim=1)
             J = torch.where(J > 0.0, J, 1.0)
-            for b in range(batch_size):
-                total_comms[b, i, :] = torch.inner(mask[b, i, :], hidden.permute(0,2,1)[b, :, :])
-                comms[b, i, :] = torch.mul(total_comms[b, i, :], (1/J[b]))
+            J = torch.stack([J]*hx_size, dim=1)
+
+            # apply mask to get sum of hidden layers from only appropriate agents
+            total_comm = torch.einsum('ik,ikj->ij', mask[:, i, :],  hidden)
+
+            # multiply by coefficient tensor to get result representing average communication
+            comms[:, i, :] = torch.mul(total_comm, (1/J))
+
         return comms
 
     def forward(self, obs):

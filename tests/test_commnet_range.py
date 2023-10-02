@@ -106,9 +106,8 @@ class TestCOMMNET_RANGE(unittest.TestCase):
 
         batch_size = 2
         num_agents = 4
-        obs_size = 2 # position
+        obs_size = 3 # position
 
-        
         mock_mask = torch.tensor([
             [
                 [0., 0., 0., 0.], 
