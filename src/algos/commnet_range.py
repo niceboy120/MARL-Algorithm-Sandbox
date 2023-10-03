@@ -29,12 +29,12 @@ default_options = {
 }
 
 class COMMNET_RANGE(MALearner):
-    def __init__(self, observation_space, action_space, neighborhood, options=default_options):
+    def __init__(self, observation_space, action_space, env_name, neighborhood, options=default_options):
         super().__init__(observation_space, action_space, options)
 
         # instantiate the prediction (q) and target (q_target) networks
-        self.q = QNet(observation_space, action_space, neighborhood)
-        self.q_target = QNet(observation_space, action_space, neighborhood)
+        self.q = QNet(observation_space, action_space, env_name, neighborhood)
+        self.q_target = QNet(observation_space, action_space, env_name, neighborhood)
         self.q_target.load_state_dict(self.q.state_dict())
 
         print("\nInstantiating Prediction Network:")
@@ -91,7 +91,7 @@ class COMMNET_RANGE(MALearner):
 class QNet(nn.Module):
     """A Deep Q Network 
     """
-    def __init__(self, observation_space, action_space, neighborhood):
+    def __init__(self, observation_space, action_space, env_name, neighborhood):
         """
         Args:
             observation_space ([gym.Env.observation_space]): The observation space for each agent
@@ -106,7 +106,7 @@ class QNet(nn.Module):
         self.hx_size = 64
         self.k = 1
 
-        self.grid_size = (3, 7)
+        self.env_name = env_name
         self.neighborhood = neighborhood
 
         self.encode_nets = nn.ModuleList()
@@ -149,9 +149,29 @@ class QNet(nn.Module):
 
 
     def obs_to_pos(self, obs):
-        X, Y = self.grid_size
-        scales = torch.tensor([float(X-1), float(Y-1)]).to(self.device)
-        return torch.mul(obs, scales)
+        env_name = self.env_name
+        if env_name == "ma_gym:Switch4-v0":
+            X, Y = 3, 7 # grid size for switch
+            scales = torch.tensor([float(X-1), float(Y-1)]).to(self.device)
+            # obs is num_agents copies of 2d position of each agent scaled to the grid
+            pos = torch.mul(obs, scales)
+        elif env_name == "ma_gym:TrafficJunction4-v0": 
+            X, Y = 14, 14 # grid-size for traffic
+            scales = torch.tensor([float(X-1), float(Y-1)]).to(self.device)
+            # obs is num_agents copies of 3^2 observable area around each agent
+            ob_size = 3**2
+            pos = torch.zeros(obs.shape[0], self.num_agents, 2).to(self.device)
+            for i in range(self.num_agents):
+                ob = obs[:, i, :]
+                # center cell contains info about the current agent
+                center = ob[:, 4*ob_size:5*ob_size]
+                #ag_id = center[:, 0:4]
+                ag_pos = center[:, 4:6]
+                #ag_rt = center[:, 6:]
+                # rescale the agent position
+                p = torch.mul(ag_pos, scales)
+                pos[:, i] = p
+        return pos
 
     def get_nei_mask(self, obs):
         agent_pos = self.obs_to_pos(obs)
@@ -184,6 +204,7 @@ class QNet(nn.Module):
         return comms
 
     def forward(self, obs):
+        obs = obs.to(self.device)
         q_values = [torch.empty(obs.shape[0], ).to(self.device)] * self.num_agents
         torch.autograd.set_detect_anomaly(True)
 
