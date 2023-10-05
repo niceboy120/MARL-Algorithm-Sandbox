@@ -10,6 +10,7 @@ import numpy as np
 from common.learner import MALearner
 
 from torchview import draw_graph
+import math
 
 default_options = {
     'lr': 0.00001,
@@ -85,7 +86,30 @@ class COMMNET_RANGE(MALearner):
             loss.backward()
             self.optimizer.step()
 
+class CommLayer(nn.Module):
+    """ Custom Linear layer for CommNet implementation """
+    def __init__(self, size_in, size_out):
+        super().__init__()
+        self.size_in, self.size_out = size_in, size_out
 
+        # seperate weights for hidden layer and communication vector
+        self.H = nn.Parameter(torch.ones(size_in))
+        self.C = nn.Parameter(torch.Tensor(size_out, size_in))
+        self.b = torch.Tensor(size_out)
+
+        # initialize weights
+        lim = 0.01  # initialize weights and bias
+        #nn.init.kaiming_uniform_(self.H, a=math.sqrt(5)) # weight init
+        nn.init.kaiming_uniform_(self.C, a=math.sqrt(5)) # weight init
+        nn.init.uniform_(self.H, -lim, +lim)
+        nn.init.uniform_(self.b, -lim, +lim)
+
+    def forward(self, x):
+        h, c = x[:, :self.size_in], x[:, self.size_in:]
+        #H_times_h= torch.matmul(h, self.H.t())
+        H_times_h= torch.mul(h, self.H.t())
+        C_times_c= torch.matmul(c, self.C.t())
+        return torch.add(H_times_h, C_times_c, selfl.b.t())  # w times x + 
 
 
 class QNet(nn.Module):
@@ -109,15 +133,16 @@ class QNet(nn.Module):
         self.env_name = env_name
         self.neighborhood = neighborhood
 
-        self.comm_nets = nn.ModuleList()
-        for agent_i in range(self.num_agents):
-            n_obs = observation_space[agent_i].shape[0]
+        #self.comm_nets = nn.ModuleList()
+        #for agent_i in range(self.num_agents):
+        #    n_obs = observation_space[agent_i].shape[0]
 
-            comm_net = nn.Sequential(
-                nn.Linear(2*self.hx_size, self.hx_size),
-                nn.Tanh(),
-            ).to(self.device)
-            self.comm_nets.append(comm_net)
+        #    comm_net = nn.Sequential(
+        #        #nn.Linear(2*self.hx_size, self.hx_size),
+        #        CommLayer(2*self.hx_size, self.hx_size),
+        #        nn.Tanh(),
+        #    ).to(self.device)
+        #    self.comm_nets.append(comm_net)
 
 
         n_obs = observation_space[0].shape[0]
@@ -131,6 +156,7 @@ class QNet(nn.Module):
 
         self.comm_net = nn.Sequential(
             nn.Linear(2*self.hx_size, self.hx_size),
+            #CommLayer(self.hx_size, self.hx_size),
             nn.Tanh(),
         ).to(self.device)
         # self.comm_nets.append(comm_net)
@@ -218,7 +244,7 @@ class QNet(nn.Module):
         hidden = torch.empty(obs.shape[0], self.num_agents, self.hx_size).to(self.device)
         
         # get neighbor hook mask tensor
-        mask = self.get_nei_mask(obs)
+        mask = self.get_nei_mask(obs) # b x n x n
 
         # get observation encodings for all the agents
         x = self.encode_net(obs)
@@ -229,18 +255,22 @@ class QNet(nn.Module):
             next_hidden = torch.empty(obs.shape[0], self.num_agents, self.hx_size).to(self.device)
 
             comms = self.get_communications(mask, hidden)
-            comm_input = torch.cat((hidden, comms), axis=2).to(self.device)
+            comm_input = torch.cat((hidden, comms), axis=2).to(self.device) # b x n x 2h
 
-            #for agent_i in range(self.num_agents):
-            #    h = hidden[:, agent_i, :]
+            # for agent_i in range(self.num_agents):
+            #     h = hidden[:, agent_i, :]
 
-            #    # communication vector is mean of other agents hidden layers
-            #    comm = comms[:, agent_i, :]
-            #    agent_comm_net = self.comm_nets[agent_i]
-            #    x = agent_comm_net(comm_input[:, agent_i, :]).to(self.device)
+            #     # communication vector is mean of other agents hidden layers
+            #     comm = comms[:, agent_i, :]
+            #     agent_comm_net = self.comm_nets[agent_i]
+            #     x = agent_comm_net(comm_input[:, agent_i, :]).to(self.device)
 
-            #    next_hidden[:, agent_i, :] = x
-            #hidden = next_hidden
+            #     next_hidden[:, agent_i, :] = x
+            # hidden = next_hidden
+            # print(f"mask: {mask[0, 0, :]}")
+            # masked_comm_input = torch.einsum('ijk,ijl->ijkl', mask, hidden)
+            # print(f"comm_input has size: {masked_comm_input.size()}")
+            # print(f"comm_input has size: {masked_comm_input[0, 0, :, :]}")
 
             # print(f"comm_input size is: {comm_input.size()}")
             hidden = self.comm_net(comm_input).to(self.device)
