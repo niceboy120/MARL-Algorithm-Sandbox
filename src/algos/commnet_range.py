@@ -109,31 +109,51 @@ class QNet(nn.Module):
         self.env_name = env_name
         self.neighborhood = neighborhood
 
-        self.encode_nets = nn.ModuleList()
+        #self.encode_nets = nn.ModuleList()
         self.comm_nets = nn.ModuleList()
         self.decode_nets = nn.ModuleList()
 
-        for agent_i in range(self.num_agents):
-            n_obs = observation_space[agent_i].shape[0]
+        # for agent_i in range(self.num_agents):
+        #     n_obs = observation_space[agent_i].shape[0]
+        #     # self.encode_net = nn.Sequential(
+        #     #     nn.Linear(n_obs, 128),
+        #     #     nn.ReLU(),
+        #     #     # nn.Linear(128, self.hx_size),
+        #     #     # nn.ReLU(),
+        #     # ).to(self.device)
+        #     # # self.encode_nets.append(encode_net)
 
-            encode_net = nn.Sequential(
-                nn.Linear(n_obs, 128),
-                nn.ReLU(),
-                nn.Linear(128, self.hx_size),
-                nn.ReLU(),
-            ).to(self.device)
-            self.encode_nets.append(encode_net)
+        #     comm_net = nn.Sequential(
+        #         nn.Linear(2*self.hx_size, self.hx_size),
+        #         nn.Tanh(),
+        #     ).to(self.device)
+        #     self.comm_nets.append(comm_net)
 
-            comm_net = nn.Sequential(
-                nn.Linear(2*self.hx_size, self.hx_size),
-                nn.Tanh(),
-            ).to(self.device)
-            self.comm_nets.append(comm_net)
+        #     decode_net = nn.Sequential(
+        #         nn.Linear(self.hx_size, action_space[agent_i].n)
+        #     ).to(self.device)
+        #     self.decode_nets.append(decode_net)
 
-            decode_net = nn.Sequential(
-                nn.Linear(self.hx_size, action_space[agent_i].n)
-            ).to(self.device)
-            self.decode_nets.append(decode_net)
+        n_obs = observation_space[0].shape[0]
+        self.encode_net = nn.Sequential(
+            nn.Linear(n_obs, 128),
+            nn.ReLU(),
+            nn.Linear(128, self.hx_size),
+            nn.ReLU(),
+        ).to(self.device)
+        # self.encode_nets.append(encode_net)
+
+        self.comm_net = nn.Sequential(
+            nn.Linear(2*self.hx_size, self.hx_size),
+            nn.Tanh(),
+        ).to(self.device)
+        # self.comm_nets.append(comm_net)
+
+        self.decode_net = nn.Sequential(
+            #nn.Linear(self.hx_size, action_space[agent_i].n)
+            nn.Linear(self.hx_size, action_space[0].n)
+        ).to(self.device)
+        # self.decode_nets.append(decode_net)
 
     def set_device(self, i=0):
         if torch.cuda.is_available():  
@@ -205,49 +225,59 @@ class QNet(nn.Module):
 
     def forward(self, obs):
         obs = obs.to(self.device)
+        # print(f"obs has size: {obs.size()}")
         q_values = [torch.empty(obs.shape[0], ).to(self.device)] * self.num_agents
         torch.autograd.set_detect_anomaly(True)
 
-        hidden = torch.empty(obs.shape[0], self.num_agents, self.hx_size).to(self.device)
+        #hidden = torch.empty(obs.shape[0], self.num_agents, self.hx_size).to(self.device)
         # get observation encodings for all the agents
         
         # get neighbor hook mask tensor
         mask = self.get_nei_mask(obs)
 
-        for agent_i in range(self.num_agents):
-            agent_obs = obs[:, agent_i, :].to(self.device)
+        # for agent_i in range(self.num_agents):
+            # agent_obs = obs[:, agent_i, :].to(self.device)
 
-            # update the agent position info
-            agent_encode_net = self.encode_nets[agent_i]
+            # # update the agent position info
+            # agent_encode_net = self.encode_nets[agent_i]
 
-            x = agent_encode_net(agent_obs)
-            hidden[:, agent_i, :] = x.squeeze()
+            # x = agent_encode_net(agent_obs)
+            # hidden[:, agent_i, :] = x.squeeze()
+        hidden = self.encode_net(obs).squeeze()
 
         # perform communication between agents
         for t in range(self.k):
-            next_hidden = torch.empty(obs.shape[0], self.num_agents, self.hx_size).to(self.device)
+            #next_hidden = torch.empty(obs.shape[0], self.num_agents, self.hx_size).to(self.device)
 
             comms = self.get_communications(mask, hidden)
 
-            for agent_i in range(self.num_agents):
-                h = hidden[:, agent_i, :]
+            #for agent_i in range(self.num_agents):
+            #    h = hidden[:, agent_i, :]
 
-                # communication vector is mean of other agents hidden layers
-                comm = comms[:, agent_i, :]
+            #    # communication vector is mean of other agents hidden layers
+            #    comm = comms[:, agent_i, :]
 
-                comm_input = torch.cat((h, comm), axis=1).to(self.device)
-                agent_comm_net = self.comm_nets[agent_i]
-                x = agent_comm_net(comm_input).to(self.device)
+            #    comm_input = torch.cat((h, comm), axis=1).to(self.device)
+            #    agent_comm_net = self.comm_nets[agent_i]
+            #    #agent_comm_net = self.comm_net
+            #    x = agent_comm_net(comm_input).to(self.device)
 
-                next_hidden[:, agent_i, :] = x
-            hidden = next_hidden
+
+            #    next_hidden[:, agent_i, :] = x
+            #hidden = next_hidden
+
+            comm_input = torch.cat((hidden, comms), axis=2).to(self.device)
+            # print(f"comm_input size is: {comm_input.size()}")
+            hidden = self.comm_net(comm_input).to(self.device)
+
 
         # extract action preferences from the resultant hidden layers
-        for agent_i in range(self.num_agents):
-            agent_decode_net = self.decode_nets[agent_i]
-            q_values[agent_i] = agent_decode_net(hidden[:, agent_i, :]).unsqueeze(1)
-
-        return torch.cat(q_values, dim=1)
+        # for agent_i in range(self.num_agents):
+        #     agent_decode_net = self.decode_nets[agent_i]
+        #     q_values[agent_i] = agent_decode_net(hidden[:, agent_i, :]).unsqueeze(1)
+        q_values = self.decode_net(hidden)
+        # return torch.cat(q_values, dim=1)
+        return q_values
 
     def sample_action(self, obs, epsilon):
         out = self.forward(obs).to(self.device)
