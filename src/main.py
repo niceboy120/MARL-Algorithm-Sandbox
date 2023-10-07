@@ -24,6 +24,16 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, neighborhood, 
     env = gym.make(env_name)
     test_env = gym.make(env_name)
 
+
+    if torch.cuda.is_available():  
+        dev = f'cuda:0' 
+        print(f"Using Device: {torch.cuda.get_device_name(0)}")
+    else:  
+        dev = 'cpu'  
+    device = torch.device(dev)  
+    torch.set_default_device(device)
+
+
     # create networks
     print(f"using algorithm: {algo} on environment: {env_name}")
     match algo:
@@ -48,13 +58,8 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, neighborhood, 
     #result_data = np.zeros((num_runs, num_episodes, 2))
     # result_data = np.zeros((num_episodes // log_interval, 2))
     result_data = torch.zeros([num_episodes // log_interval, 2])
-    if torch.cuda.is_available():  
-        dev = f'cuda:0' 
-        print(f"Using Device: {torch.cuda.get_device_name(0)}")
-    else:  
-        dev = 'cpu'  
-    device = torch.device(dev)  
     result_data = result_data.to(device)
+
     # perform runs
     # for run_i in range(num_runs):
     #     print(f"performing run: {run_i}")
@@ -104,8 +109,8 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, neighborhood, 
                 result_data[episode_i // log_interval, 1] = test_steps
             score, steps = 0, 0
 
-    if not USE_WANDB:
-        np.save(f"{results_dir}/{algo}_{num_episodes}_{num_runs}_{env_name}.npy", result_data.cpu())
+    # if not USE_WANDB:
+        # np.save(f"{results_dir}/{algo}_{num_episodes}_{num_runs}_{env_name}.npy", result_data.cpu())
     env.close()
     test_env.close()
 

@@ -13,7 +13,7 @@ from torchview import draw_graph
 import math
 
 default_options = {
-    'lr': 0.00001,
+    'lr': 0.001,
     'k': 1, # number of communication steps
     'batch_size': 32,
     'gamma': 0.99,
@@ -93,23 +93,26 @@ class CommLayer(nn.Module):
         self.size_in, self.size_out = size_in, size_out
 
         # seperate weights for hidden layer and communication vector
-        self.H = nn.Parameter(torch.ones(size_in))
-        self.C = nn.Parameter(torch.Tensor(size_out, size_in))
-        self.b = torch.Tensor(size_out)
+        # self.b = torch.Tensor(size_out)
+        self.T = nn.Parameter(torch.ones(size_in, size_out))
 
         # initialize weights
         lim = 0.01  # initialize weights and bias
-        #nn.init.kaiming_uniform_(self.H, a=math.sqrt(5)) # weight init
-        nn.init.kaiming_uniform_(self.C, a=math.sqrt(5)) # weight init
-        nn.init.uniform_(self.H, -lim, +lim)
-        nn.init.uniform_(self.b, -lim, +lim)
+        # nn.init.kaiming_uniform_(self.T, a=math.sqrt(5)) # weight init
+        # nn.init.uniform_(self.b, -lim, +lim)
+        nn.init.uniform_(self.T, 1-lim, 1+lim)
 
     def forward(self, x):
-        h, c = x[:, :self.size_in], x[:, self.size_in:]
-        #H_times_h= torch.matmul(h, self.H.t())
-        H_times_h= torch.mul(h, self.H.t())
-        C_times_c= torch.matmul(c, self.C.t())
-        return torch.add(H_times_h, C_times_c, selfl.b.t())  # w times x + 
+        #h, c = x[:, :, :self.size_in], x[:, self.size_in:]
+        n = x.shape[1]
+        # print(x.size())
+        # print(self.T.t())
+        h = torch.permute(x, (0, 2, 1))
+        J = (torch.ones(n) - torch.eye(n)) * (1/(n-1)) + torch.eye(n)
+
+        T_norm = torch.mul(self.T.t(), J)
+        h_next = torch.matmul(h, T_norm)
+        return torch.permute(h_next, (0, 2, 1))
 
 
 class QNet(nn.Module):
@@ -133,18 +136,6 @@ class QNet(nn.Module):
         self.env_name = env_name
         self.neighborhood = neighborhood
 
-        #self.comm_nets = nn.ModuleList()
-        #for agent_i in range(self.num_agents):
-        #    n_obs = observation_space[agent_i].shape[0]
-
-        #    comm_net = nn.Sequential(
-        #        #nn.Linear(2*self.hx_size, self.hx_size),
-        #        CommLayer(2*self.hx_size, self.hx_size),
-        #        nn.Tanh(),
-        #    ).to(self.device)
-        #    self.comm_nets.append(comm_net)
-
-
         n_obs = observation_space[0].shape[0]
         self.encode_net = nn.Sequential(
             nn.Linear(n_obs, 128),
@@ -155,8 +146,9 @@ class QNet(nn.Module):
         # self.encode_nets.append(encode_net)
 
         self.comm_net = nn.Sequential(
-            nn.Linear(2*self.hx_size, self.hx_size),
+            #nn.Linear(2*self.hx_size, self.hx_size),
             #CommLayer(self.hx_size, self.hx_size),
+            CommLayer(self.num_agents, self.num_agents),
             nn.Tanh(),
         ).to(self.device)
         # self.comm_nets.append(comm_net)
@@ -179,20 +171,19 @@ class QNet(nn.Module):
 
         self.to(device)
 
-
     def obs_to_pos(self, obs):
         env_name = self.env_name
         if env_name == "ma_gym:Switch4-v0":
             X, Y = 3, 7 # grid size for switch
-            scales = torch.tensor([float(X-1), float(Y-1)]).to(self.device)
+            scales = torch.tensor([float(X-1), float(Y-1)])
             # obs is num_agents copies of 2d position of each agent scaled to the grid
             pos = torch.mul(obs, scales)
         elif env_name == "ma_gym:TrafficJunction4-v0": 
             X, Y = 14, 14 # grid-size for traffic
-            scales = torch.tensor([float(X-1), float(Y-1)]).to(self.device)
+            scales = torch.tensor([float(X-1), float(Y-1)])
             # obs is num_agents copies of 3^2 observable area around each agent
             ob_size = 3**2
-            pos = torch.zeros(obs.shape[0], self.num_agents, 2).to(self.device)
+            pos = torch.zeros(obs.shape[0], self.num_agents, 2)
             for i in range(self.num_agents):
                 ob = obs[:, i, :]
                 # center cell contains info about the current agent
@@ -207,19 +198,19 @@ class QNet(nn.Module):
 
     def get_nei_mask(self, obs):
         agent_pos = self.obs_to_pos(obs)
-        mask = torch.zeros(obs.shape[0], self.num_agents).to(self.device)
+        mask = torch.zeros(obs.shape[0], self.num_agents)
         # distances between each pair of agents (p=1.0 for manhatten distance)
-        dists = torch.cdist(agent_pos, agent_pos, p=1.0).to(self.device)
+        dists = torch.cdist(agent_pos, agent_pos, p=1.0)
         # mask represeting other agents which are within the neighborhood of a given agent
-        mask = torch.where(dists > 0.0, dists, float('inf')).to(self.device)
-        mask = torch.where(mask < self.neighborhood, 1.0, 0.0).to(self.device)
+        mask = torch.where(dists > 0.0, dists, float('inf'))
+        mask = torch.where(mask < self.neighborhood, 1.0, 0.0)
         return mask
 
     def get_communications(self, mask, hidden):
         batch_size = hidden.shape[0]
         hx_size = hidden.shape[2]
 
-        comms = torch.empty(batch_size, self.num_agents, hx_size).to(self.device)
+        comms = torch.empty(batch_size, self.num_agents, hx_size)
         for i in range(self.num_agents):
             # mask for which agents will be listened to by agent 'i'
             mask_i = mask[:, i, :]
@@ -235,10 +226,10 @@ class QNet(nn.Module):
 
         return comms
 
+
     def forward(self, obs):
-        obs = obs.to(self.device)
         # print(f"obs has size: {obs.size()}")
-        q_values = [torch.empty(obs.shape[0], ).to(self.device)] * self.num_agents
+        q_values = [torch.empty(obs.shape[0], )] * self.num_agents
         torch.autograd.set_detect_anomaly(True)
 
         hidden = torch.empty(obs.shape[0], self.num_agents, self.hx_size).to(self.device)
@@ -247,43 +238,21 @@ class QNet(nn.Module):
         mask = self.get_nei_mask(obs) # b x n x n
 
         # get observation encodings for all the agents
-        x = self.encode_net(obs)
-        hidden[:, :, :] = x.squeeze()
+        hidden = self.encode_net(obs)
+        #hidden = x.squeeze()
 
         # perform communication between agents
         for t in range(self.k):
-            next_hidden = torch.empty(obs.shape[0], self.num_agents, self.hx_size).to(self.device)
-
-            comms = self.get_communications(mask, hidden)
-            comm_input = torch.cat((hidden, comms), axis=2).to(self.device) # b x n x 2h
-
-            # for agent_i in range(self.num_agents):
-            #     h = hidden[:, agent_i, :]
-
-            #     # communication vector is mean of other agents hidden layers
-            #     comm = comms[:, agent_i, :]
-            #     agent_comm_net = self.comm_nets[agent_i]
-            #     x = agent_comm_net(comm_input[:, agent_i, :]).to(self.device)
-
-            #     next_hidden[:, agent_i, :] = x
-            # hidden = next_hidden
-            # print(f"mask: {mask[0, 0, :]}")
-            # masked_comm_input = torch.einsum('ijk,ijl->ijkl', mask, hidden)
-            # print(f"comm_input has size: {masked_comm_input.size()}")
-            # print(f"comm_input has size: {masked_comm_input[0, 0, :, :]}")
-
-            # print(f"comm_input size is: {comm_input.size()}")
-            hidden = self.comm_net(comm_input).to(self.device)
-
+            hidden = self.comm_net(hidden)
 
         # extract action preferences from the resultant hidden layers
         q_values = self.decode_net(hidden)
         return q_values
 
     def sample_action(self, obs, epsilon):
-        out = self.forward(obs).to(self.device)
-        mask = (torch.rand((out.shape[0],)).to(self.device) <= epsilon)
-        action = torch.empty((out.shape[0], out.shape[1],)).to(self.device)
-        action[mask] = torch.randint(0, out.shape[2], action[mask].shape).float().to(self.device)
-        action[~mask] = out[~mask].argmax(dim=2).float().to(self.device)
+        out = self.forward(obs)
+        mask = (torch.rand((out.shape[0],)) <= epsilon)
+        action = torch.empty((out.shape[0], out.shape[1],))
+        action[mask] = torch.randint(0, out.shape[2], action[mask].shape).float()
+        action[~mask] = out[~mask].argmax(dim=2).float()
         return action

@@ -4,7 +4,7 @@ sys.path.append('.')
 sys.path.append('./src')
 
 
-from src.algos.commnet_range import COMMNET_RANGE
+from src.algos.commnet_range import COMMNET_RANGE, CommLayer
 import torch
 import gym
 
@@ -34,7 +34,7 @@ class TestCOMMNET_RANGE(unittest.TestCase):
     def test_agent_num_equal_to_num_of_observations(self):
         env = gym.make('ma_gym:Switch4-v0')
         N = 10 # size of neighborhood
-        learner = COMMNET_RANGE(env.observation_space, env.action_space, neighborhood=N)
+        learner = COMMNET_RANGE(env.observation_space, env.action_space, env_name="ma_gym:Switch4-v0", neighborhood=N)
         # it should have an empty array of nodes and edges
         self.assertEqual(learner.q.num_agents, len(env.observation_space))
 
@@ -61,7 +61,7 @@ class TestCOMMNET_RANGE(unittest.TestCase):
     def test_get_nei_mask_returns_1_for_proximal_and_0_for_non_proximal_agents(self):
         env = gym.make('ma_gym:Switch4-v0')
         N = 1 # size of neighborhood
-        learner = COMMNET_RANGE(env.observation_space, env.action_space, neighborhood=N)
+        learner = COMMNET_RANGE(env.observation_space, env.action_space, env_name="ma_gym:Switch4-v0", neighborhood=N)
         q_net = learner.q
         batch_size = 2
         
@@ -81,7 +81,7 @@ class TestCOMMNET_RANGE(unittest.TestCase):
     def test_get_nei_mask_returns_0_for_own_agent(self):
         env = gym.make('ma_gym:Switch4-v0')
         N = 1 # size of neighborhood
-        learner = COMMNET_RANGE(env.observation_space, env.action_space, neighborhood=N)
+        learner = COMMNET_RANGE(env.observation_space, env.action_space, env_name="ma_gym:Switch4-v0", neighborhood=N)
         q_net = learner.q
         batch_size = 2
         num_agents = 4
@@ -101,7 +101,7 @@ class TestCOMMNET_RANGE(unittest.TestCase):
     def test_get_communication(self):
         env = gym.make('ma_gym:Switch4-v0')
         N = 10 # size of neighborhood
-        learner = COMMNET_RANGE(env.observation_space, env.action_space, neighborhood=N)
+        learner = COMMNET_RANGE(env.observation_space, env.action_space, env_name="ma_gym:Switch4-v0", neighborhood=N)
         q_net = learner.q
 
         batch_size = 2
@@ -148,4 +148,33 @@ class TestCOMMNET_RANGE(unittest.TestCase):
         self.assertEqual(comm[b, 3, :].tolist(), [0., 0., 0.]) # batch 1
 
 
+    def test_comm_layer(self):
+        env = gym.make('ma_gym:Switch4-v0')
+        N = 10 # size of neighborhood
+        learner = COMMNET_RANGE(env.observation_space, env.action_space, env_name="ma_gym:Switch4-v0", neighborhood=N)
+        q_net = learner.q
+
+        batch_size = 2
+        num_agents = 4
+        obs_size = 3 # position
+
+        comm_net = CommLayer(num_agents, num_agents)
+
+        mock_hidden = torch.tensor([
+            [[2.0, 3.0, 1.0], [1.0, 5.0, 1.0], [2.0, 3.0, 1.0], [1.0, 5.0, 1.0]],
+            [[5.0, 1.0, 1.0], [2.0, 0.0, 1.0], [2.0, 3.0, 1.0], [1.0, 5.0, 1.0]]
+        ])
+        
+        # calculate the expected hidden layer after communication is applied
+        mask = torch.ones(num_agents) - torch.eye(num_agents) 
+        mask = torch.stack([mask]*batch_size, dim=0)
+        target_comm = q_net.get_communications(mask, mock_hidden)
+        target_h = (target_comm + mock_hidden).detach()
+
+        # check the output of the comm_layer
+        h = comm_net(mock_hidden).detach()
+
+
+        # the expected and actual hidden output should be close to each other
+        self.assertTrue(torch.allclose(h, target_h, rtol=1e-5))
 
