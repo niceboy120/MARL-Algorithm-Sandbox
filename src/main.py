@@ -4,12 +4,10 @@ import argparse
 import gym
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 from algos.vdn import VDN
 from algos.idqn import IDQN
-from algos.commnet import COMMNET
-from algos.commnet_range import COMMNET_RANGE
+from algos.commnet import CommNetLearner
 from algos.ic3net import IC3NET
 from algos.g2anet import G2ANET
 from algos.maddpg import MADDPG
@@ -40,9 +38,7 @@ def main(env_name, algo, results_dir, log_interval, num_episodes, neighborhood, 
         case "vdn":
             learner = VDN(env.observation_space, env.action_space)
         case "commnet":
-            learner = COMMNET(env.observation_space, env.action_space)
-        case "commnet_range":
-            learner = COMMNET_RANGE(env.observation_space, env.action_space, env_name, neighborhood)
+            learner = CommNetLearner(env.observation_space, env.action_space, env_name, neighborhood)
         case "ic3net":
             learner = IC3NET(env.observation_space, env.action_space)
         case "g2anet":

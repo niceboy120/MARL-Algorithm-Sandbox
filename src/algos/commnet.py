@@ -4,18 +4,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from common.replay_buffer import ReplayBuffer
-
+from common.replay_buffer import ReplayBuffer 
 import numpy as np
 
-from common.learner import MALearner
+from common.learner import StateLearner
 
 from torchview import draw_graph
+import math
 
 default_options = {
-    'lr': 0.0005,
+    'lr': 0.001,
     'k': 1, # number of communication steps
-    'batch_size': 1,
+    'batch_size': 32,
     'gamma': 0.99,
     'buffer_limit': 50000,
     'log_interval': 20,
@@ -25,17 +25,16 @@ default_options = {
     'test_episodes': 5,
     'warm_up_steps': 2000,
     'update_iter': 10,
-    'update_target_interval': 20,
-    'monitor': False
+    'update_target_interval': 20
 }
 
-class COMMNET(MALearner):
-    def __init__(self, observation_space, action_space, options=default_options):
+class CommNetLearner(StateLearner):
+    def __init__(self, observation_space, action_space, env_name, neighborhood, options=default_options):
         super().__init__(observation_space, action_space, options)
 
         # instantiate the prediction (q) and target (q_target) networks
-        self.q = QNet(observation_space, action_space)
-        self.q_target = QNet(observation_space, action_space)
+        self.q = CommNet(observation_space, action_space, env_name, neighborhood)
+        self.q_target = CommNet(observation_space, action_space, env_name, neighborhood)
         self.q_target.load_state_dict(self.q.state_dict())
 
         print("\nInstantiating Prediction Network:")
@@ -44,23 +43,15 @@ class COMMNET(MALearner):
         # tell the optimizer to update the network parameters at the lr
         self.optimizer = optim.Adam(self.q.parameters(), lr=self.lr)
 
-    def init_hidden(self):
-        pass
-
-    def sample_action(self, obs, epsilon):
-        return self.q.sample_action(obs, epsilon)
-
-    def per_step_update(self, state, action, reward, next_state, done):
-        self.memory.put((state, action, (np.array(reward)).tolist(), next_state, [int(all(done))]))
-
-    def per_episode_update(self, episode_i):
-        if self.memory.size() > self.warm_up_steps:
-            self.train(self.gamma, self.batch_size, self.update_iter)
-
-        # at every update interval update the target q_network
-        if episode_i % self.update_target_interval:
-            self.q_target.load_state_dict(self.q.state_dict())
-
+    def pool_rewards(self, r):
+        """
+            r: input tensor of size [num_batches, num_agents] representing seperate rewards for each agent
+            returns: tensor of size [num_batches, num_agents] representing pooled team reward (containing all equal values for a given batch)
+        """
+        num_agents = r.shape[1]
+        r = torch.sum(r, dim=1)
+        r = torch.stack([r]*num_agents, dim=1)
+        return r
 
     def train(self, gamma, batch_size, update_iter=10):
         for _ in range(update_iter):
@@ -70,9 +61,8 @@ class COMMNET(MALearner):
             # estimate the value of the current states and actions
             q_out = self.q(s)
             q_a = q_out.gather(2, a.unsqueeze(-1).long()).squeeze(-1)
-            #shape = tuple(s.shape)
-            ##print(shape)
-            #draw_graph(self.q, input_size=shape, expand_nested=True, filename='./diagrams/commnet', save_graph=True)
+            
+            r = self.pool_rewards(r)
 
             # estimate the target value as the discounted q value of the optimal actions in the next states
             max_q_prime = self.q_target(s_prime).max(dim=2)[0]
@@ -87,49 +77,71 @@ class COMMNET(MALearner):
             self.optimizer.step()
 
 
+class CommLayer(nn.Module):
+    """ Custom Linear layer for CommNet implementation """
+    def __init__(self, size_in, size_out):
+        super().__init__()
+        self.size_in, self.size_out = size_in, size_out
+
+        # seperate weights for hidden layer and communication vector
+        # self.b = torch.Tensor(size_out)
+        self.T = nn.Parameter(torch.zeros(size_in, size_out) + torch.eye(size_in))
+
+        # initialize weights
+        lim = 0.01  # initialize weights and bias
+        # nn.init.kaiming_uniform_(self.T, a=math.sqrt(5)) # weight init
+        # nn.init.uniform_(self.b, -lim, +lim)
+        # nn.init.uniform_(self.T, 1-lim, 1+lim)
+
+    def forward(self, x):
+        n = x.shape[1] # number of agents
+        h = torch.permute(x, (0, 2, 1)) 
+        J = (torch.ones(n) - torch.eye(n)) * (1/(n-1)) + torch.eye(n)
+
+        T_norm = torch.mul(self.T.t(), J)
+        h_next = torch.matmul(h, T_norm)
+        return torch.permute(h_next, (0, 2, 1))
 
 
-class QNet(nn.Module):
+class CommNet(nn.Module):
     """A Deep Q Network 
     """
-    def __init__(self, observation_space, action_space):
+    def __init__(self, observation_space, action_space, env_name, neighborhood):
         """
         Args:
             observation_space ([gym.Env.observation_space]): The observation space for each agent
             action_space ([gym.Env.action_space]): The action space for each agent
         """
-        super(QNet, self).__init__()
+        super(CommNet, self).__init__()
         self.num_agents = len(observation_space)
+        #self.agent_pos = [(0,0) for _ in range(self.num_agents)]
+
         self.set_device()
 
         self.hx_size = 64
-        self.k = 4
+        self.k = 1
 
-        self.encode_nets = nn.ModuleList()
-        self.comm_nets = nn.ModuleList()
-        self.decode_nets = nn.ModuleList()
+        self.env_name = env_name
+        self.neighborhood = neighborhood
 
-        for agent_i in range(self.num_agents):
-            n_obs = observation_space[agent_i].shape[0]
+        n_obs = observation_space[0].shape[0]
+        self.encode_net = nn.Sequential(
+            nn.Linear(n_obs, self.hx_size),
+            nn.ReLU(),
+        ).to(self.device)
 
-            encode_net = nn.Sequential(
-                nn.Linear(n_obs, 128),
-                nn.ReLU(),
-                nn.Linear(128, self.hx_size),
-                nn.ReLU(),
-            ).to(self.device)
-            self.encode_nets.append(encode_net)
+        self.comm_net = nn.Sequential(
+            #nn.Linear(2*self.hx_size, self.hx_size),
+            #CommLayer(self.hx_size, self.hx_size),
+            CommLayer(self.num_agents, self.num_agents),
+            nn.Tanh(),
+        ).to(self.device)
+        # self.comm_nets.append(comm_net)
 
-            comm_net = nn.Sequential(
-                nn.Linear(2*self.hx_size, self.hx_size),
-                nn.Tanh(),
-            ).to(self.device)
-            self.comm_nets.append(comm_net)
-
-            decode_net = nn.Sequential(
-                nn.Linear(self.hx_size, action_space[agent_i].n)
-            ).to(self.device)
-            self.decode_nets.append(decode_net)
+        self.decode_net = nn.Sequential(
+            #nn.Linear(self.hx_size, action_space[agent_i].n)
+            nn.Linear(self.hx_size, action_space[0].n)
+        ).to(self.device)
 
     def set_device(self, i=0):
         if torch.cuda.is_available():  
@@ -143,49 +155,85 @@ class QNet(nn.Module):
 
         self.to(device)
 
+    def obs_to_pos(self, obs):
+        env_name = self.env_name
+        if env_name == "ma_gym:Switch4-v0":
+            X, Y = 3, 7 # grid size for switch
+            scales = torch.tensor([float(X-1), float(Y-1)])
+            # obs is num_agents copies of 2d position of each agent scaled to the grid
+            pos = torch.mul(obs, scales)
+        elif env_name == "ma_gym:TrafficJunction4-v0": 
+            X, Y = 14, 14 # grid-size for traffic
+            scales = torch.tensor([float(X-1), float(Y-1)])
+            # obs is num_agents copies of 3^2 observable area around each agent
+            ob_size = 3**2
+            pos = torch.zeros(obs.shape[0], self.num_agents, 2)
+            for i in range(self.num_agents):
+                ob = obs[:, i, :]
+                # center cell contains info about the current agent
+                center = ob[:, 4*ob_size:5*ob_size]
+                #ag_id = center[:, 0:4]
+                ag_pos = center[:, 4:6]
+                #ag_rt = center[:, 6:]
+                # rescale the agent position
+                p = torch.mul(ag_pos, scales)
+                pos[:, i] = p
+        return pos
+
+    def get_nei_mask(self, obs):
+        agent_pos = self.obs_to_pos(obs)
+        mask = torch.zeros(obs.shape[0], self.num_agents)
+        # distances between each pair of agents (p=1.0 for manhatten distance)
+        dists = torch.cdist(agent_pos, agent_pos, p=1.0)
+        # mask represeting other agents which are within the neighborhood of a given agent
+        mask = torch.where(dists > 0.0, dists, float('inf'))
+        mask = torch.where(mask < self.neighborhood, 1.0, 0.0)
+        return mask
+
+    def get_communications(self, mask, hidden):
+        batch_size = hidden.shape[0]
+        hx_size = hidden.shape[2]
+
+        comms = torch.empty(batch_size, self.num_agents, hx_size)
+        for i in range(self.num_agents):
+            # mask for which agents will be listened to by agent 'i'
+            mask_i = mask[:, i, :]
+            # coefficent tensor for averaging across whole batch
+            J = mask_i.sum(dim=1)
+            J = torch.where(J > 0.0, J, 1.0)
+
+            # apply mask to get sum of hidden layers from only appropriate agents
+            total_comm = torch.einsum('ik,ikj->ij', mask[:, i, :],  hidden)
+
+            # multiply by coefficient tensor to get result representing average communication
+            comms[:, i, :] = torch.einsum('ij,i->ij',total_comm, (1/J))
+
+        return comms
+
 
     def forward(self, obs):
-        q_values = [torch.empty(obs.shape[0], ).to(self.device)] * self.num_agents
+        # print(f"obs has size: {obs.size()}")
+        q_values = [torch.empty(obs.shape[0], )] * self.num_agents
         torch.autograd.set_detect_anomaly(True)
 
-        hidden = torch.empty(obs.shape[0], 1, self.hx_size, self.num_agents).to(self.device)
+
         # get observation encodings for all the agents
-        for agent_i in range(self.num_agents):
-            agent_obs = obs[:, agent_i, :].to(self.device)
-            agent_encode_net = self.encode_nets[agent_i]
+        hidden = self.encode_net(obs)
 
-            x = agent_encode_net(agent_obs)
-            hidden[:, 0 , :, agent_i] = x.squeeze()
-
+        # get neighbor hook mask tensor
+        #mask = self.get_nei_mask(obs) # b x n x n
         # perform communication between agents
         for t in range(self.k):
-            next_hidden = torch.empty(obs.shape[0], 1, self.hx_size, self.num_agents).to(self.device)
-            for agent_i in range(self.num_agents):
-                # communication vector is mean of other agents hidden layers
-                total_comm = torch.sum(hidden, 3)
-                h = hidden[:, :, :, agent_i]
-                comm = (total_comm - h) / (self.num_agents-1)
-
-
-                comm_input = torch.cat((h, comm), axis=2).to(self.device)
-                agent_comm_net = self.comm_nets[agent_i]
-                x = agent_comm_net(comm_input).to(self.device)
-
-                next_hidden[:, : , :, agent_i] = x
-            hidden = next_hidden
+            hidden = self.comm_net(hidden)
 
         # extract action preferences from the resultant hidden layers
-        for agent_i in range(self.num_agents):
-            agent_decode_net = self.decode_nets[agent_i]
-
-            q_values[agent_i] = agent_decode_net(hidden[:, 0, :, agent_i]).unsqueeze(1)
-
-        return torch.cat(q_values, dim=1)
+        q_values = self.decode_net(hidden)
+        return q_values
 
     def sample_action(self, obs, epsilon):
-        out = self.forward(obs).to(self.device)
-        mask = (torch.rand((out.shape[0],)).to(self.device) <= epsilon)
-        action = torch.empty((out.shape[0], out.shape[1],)).to(self.device)
-        action[mask] = torch.randint(0, out.shape[2], action[mask].shape).float().to(self.device)
-        action[~mask] = out[~mask].argmax(dim=2).float().to(self.device)
+        out = self.forward(obs)
+        mask = (torch.rand((out.shape[0],)) <= epsilon)
+        action = torch.empty((out.shape[0], out.shape[1],))
+        action[mask] = torch.randint(0, out.shape[2], action[mask].shape).float()
+        action[~mask] = out[~mask].argmax(dim=2).float()
         return action
